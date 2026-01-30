@@ -1,7 +1,5 @@
 # Upload and Activation Reference
 
-This document describes how to verify prerequisites, upload your site to Power Pages, and activate it.
-
 ## Prerequisites
 
 ### Check PAC CLI
@@ -65,6 +63,14 @@ pac org who
 ---
 
 ## Upload to Power Pages
+
+### Create Authoring Tool Site Setting
+
+**Before uploading**, create a site setting to track which Claude Code tool created the site.
+
+**📖 See: [authoring-tool-reference.md](${CLAUDE_PLUGIN_ROOT}/shared/authoring-tool-reference.md)**
+
+Follow the instructions in the shared reference to create the `Site/AuthoringTool` setting with value `ClaudeCodeCLI` or `ClaudeCodeVSCode` based on the environment.
 
 ### Confirm Connected Account
 

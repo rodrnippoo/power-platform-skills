@@ -1,18 +1,20 @@
 # Site Settings Reference
 
-This document describes how to create and configure site settings for Power Pages code sites.
-
 ## Folder Structure
 
 Site settings in Power Pages code sites are stored in the `.powerpages-site/site-settings` folder. Each setting is a separate YAML file with a unique ID.
+
+**IMPORTANT**: Use the **actual table logical names** from the `$tableMap` built in `/setup-dataverse`:
+- For **reused/extended tables**: Use the existing logical name (e.g., `contoso_items`, `existing_productcategory`)
+- For **new tables**: Use `{prefix}_tablename` pattern (e.g., `cr_product`)
 
 ```text
 <PROJECT_ROOT>/
 ├── .powerpages-site/
 │   ├── site-settings/
-│   │   ├── Webapi-cr_product-enabled.sitesetting.yml
-│   │   ├── Webapi-cr_product-fields.sitesetting.yml
-│   │   ├── Webapi-cr_teammember-enabled.sitesetting.yml
+│   │   ├── Webapi-{actual_product_table}-enabled.sitesetting.yml
+│   │   ├── Webapi-{actual_product_table}-fields.sitesetting.yml
+│   │   ├── Webapi-{actual_teammember_table}-enabled.sitesetting.yml
 │   │   └── ...
 │   └── ...
 ```
@@ -41,29 +43,19 @@ value: <SETTING_VALUE>
 
 **File naming convention**: `<SETTING_NAME_WITH_DASHES>.sitesetting.yml`
 - Replace `/` with `-` in the setting name
-- Example: Setting `Webapi/cr_product/enabled` → File `Webapi-cr_product-enabled.sitesetting.yml`
+- Example: Setting `Webapi/{prefix}_product/enabled` → File `Webapi-{prefix}_product-enabled.sitesetting.yml`
 
 ### Generating Unique IDs
 
 Each site setting must have a unique `id` field (UUID/GUID format: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
 
-**When creating YAML files directly**: Generate a valid UUID where each `x` is a hexadecimal character (0-9, a-f).
+**Claude Code MUST generate UUIDs by running a CLI command** - never write UUID values directly. Use the Bash tool to execute the appropriate command based on the user's shell/platform:
 
-**PowerShell**:
-```powershell
-[guid]::NewGuid().ToString()
-```
-
-**Bash/Linux/Mac**:
-```bash
-uuidgen | tr '[:upper:]' '[:lower:]'
-```
-
-**Python**:
-```python
-import uuid
-print(str(uuid.uuid4()))
-```
+| Shell/Platform | Command |
+|----------------|---------|
+| **PowerShell** (Windows) | `[guid]::NewGuid().ToString()` |
+| **Bash** (Linux) | `cat /proc/sys/kernel/random/uuid` |
+| **Bash/Zsh** (macOS) | `uuidgen \| tr '[:upper:]' '[:lower:]'` |
 
 ## Required Site Settings for Each Table
 
@@ -80,13 +72,13 @@ name: Webapi/<TABLE_LOGICAL_NAME>/enabled
 value: true
 ```
 
-**Example** for `cr_product` table:
+**Example** for `{prefix}_product` table:
 
-**File**: `.powerpages-site/site-settings/Webapi-cr_product-enabled.sitesetting.yml`
+**File**: `.powerpages-site/site-settings/Webapi-{prefix}_product-enabled.sitesetting.yml`
 ```yaml
-description: Enable Web API access for the cr_product table
+description: Enable Web API access for the {prefix}_product table
 id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
-name: Webapi/cr_product/enabled
+name: Webapi/{prefix}_product/enabled
 value: true
 ```
 
@@ -100,7 +92,7 @@ value: true
 description: Allowed fields for Web API access
 id: <GENERATE_UUID>
 name: Webapi/<TABLE_LOGICAL_NAME>/fields
-value: cr_name,cr_description,cr_price,cr_imageurl,cr_isactive
+value: {prefix}_name,{prefix}_description,{prefix}_price,{prefix}_imageurl,{prefix}_isactive
 ```
 
 Specify comma-separated field logical names that your frontend actually needs.
@@ -185,24 +177,43 @@ value: $Fields
 
 ### Example Usage
 
+**IMPORTANT**: Use the `$tableMap` from `/setup-dataverse` to get the actual table logical names:
+- For **reused/extended tables**: Use the existing logical name from Dataverse
+- For **new tables**: Use `${publisherPrefix}_tablename` pattern
+
 ```powershell
 $projectRoot = "<PROJECT_ROOT>"  # Replace with actual path
 
+# Get the publisher prefix first
+$api = Initialize-DataverseApi -EnvironmentUrl $envUrl
+$publisherPrefix = $api.PublisherPrefix
+
+# The $tableMap should be retrieved from memory-bank.md or rebuilt from /setup-dataverse
+# It maps table purposes to actual logical names
+function Get-TableLogicalName { param([string]$Purpose) return $tableMap[$Purpose].LogicalName }
+
+$productTable = Get-TableLogicalName "product"
+$teammemberTable = Get-TableLogicalName "teammember"
+$testimonialTable = Get-TableLogicalName "testimonial"
+$faqTable = Get-TableLogicalName "faq"
+$contactsubmissionTable = Get-TableLogicalName "contactsubmission"
+
 # Configure each table with EXPLICIT field lists (never use *)
-New-WebApiSiteSettings -ProjectRoot $projectRoot -TableLogicalName "cr_product" `
-    -Fields "cr_name,cr_description,cr_price,cr_category,cr_imageurl,cr_isactive"
+# NOTE: Use the actual table logical names from the mapping
+New-WebApiSiteSettings -ProjectRoot $projectRoot -TableLogicalName $productTable `
+    -Fields "${publisherPrefix}_name,${publisherPrefix}_description,${publisherPrefix}_price,${publisherPrefix}_category,${publisherPrefix}_imageurl,${publisherPrefix}_isactive"
 
-New-WebApiSiteSettings -ProjectRoot $projectRoot -TableLogicalName "cr_teammember" `
-    -Fields "cr_name,cr_title,cr_email,cr_bio,cr_photourl,cr_linkedin,cr_displayorder"
+New-WebApiSiteSettings -ProjectRoot $projectRoot -TableLogicalName $teammemberTable `
+    -Fields "${publisherPrefix}_name,${publisherPrefix}_title,${publisherPrefix}_email,${publisherPrefix}_bio,${publisherPrefix}_photourl,${publisherPrefix}_linkedin,${publisherPrefix}_displayorder"
 
-New-WebApiSiteSettings -ProjectRoot $projectRoot -TableLogicalName "cr_testimonial" `
-    -Fields "cr_name,cr_quote,cr_company,cr_role,cr_rating,cr_photourl,cr_isactive"
+New-WebApiSiteSettings -ProjectRoot $projectRoot -TableLogicalName $testimonialTable `
+    -Fields "${publisherPrefix}_name,${publisherPrefix}_quote,${publisherPrefix}_company,${publisherPrefix}_role,${publisherPrefix}_rating,${publisherPrefix}_photourl,${publisherPrefix}_isactive"
 
-New-WebApiSiteSettings -ProjectRoot $projectRoot -TableLogicalName "cr_faq" `
-    -Fields "cr_question,cr_answer,cr_category,cr_displayorder,cr_isactive"
+New-WebApiSiteSettings -ProjectRoot $projectRoot -TableLogicalName $faqTable `
+    -Fields "${publisherPrefix}_question,${publisherPrefix}_answer,${publisherPrefix}_category,${publisherPrefix}_displayorder,${publisherPrefix}_isactive"
 
-New-WebApiSiteSettings -ProjectRoot $projectRoot -TableLogicalName "cr_contactsubmission" `
-    -Fields "cr_name,cr_email,cr_message,cr_submissiondate,cr_status"
+New-WebApiSiteSettings -ProjectRoot $projectRoot -TableLogicalName $contactsubmissionTable `
+    -Fields "${publisherPrefix}_name,${publisherPrefix}_email,${publisherPrefix}_message,${publisherPrefix}_submissiondate,${publisherPrefix}_status"
 ```
 
 ### Create Error Setting
@@ -239,8 +250,24 @@ New-WebApiErrorSetting -ProjectRoot $projectRoot -Enabled $true
 | Setting | Purpose | Example Value |
 |---------|---------|---------------|
 | `Webapi/<table>/enabled` | Enable Web API for table | `true` |
-| `Webapi/<table>/fields` | Allowed fields (comma-separated) | `cr_name,cr_price` |
+| `Webapi/<table>/fields` | Allowed fields (comma-separated) | `{prefix}_name,{prefix}_price` |
 | `Webapi/error/innererror` | Show detailed errors (dev only) | `true` |
+| `Site/AI/AuthoringTool` | Tracks which tool created the site | `ClaudeCodeCLI` or `ClaudeCodeVSCode` |
+| `Site/AI/<SkillName>` | Tracks which skills were used | `true` |
+
+## AI Site Settings
+
+When a site is created or modified using Claude Code, site settings track the tooling:
+
+**📖 See: [authoring-tool-reference.md](${CLAUDE_PLUGIN_ROOT}/shared/authoring-tool-reference.md)**
+
+| Setting | Purpose |
+|---------|---------|
+| `Site/AI/AuthoringTool` | CLI or VS Code |
+| `Site/AI/CreateSite` | /create-site skill used |
+| `Site/AI/SetupDataverse` | /setup-dataverse skill used |
+| `Site/AI/SetupWebApi` | /setup-webapi skill used |
+| `Site/AI/SetupAuth` | /setup-auth skill used |
 
 ## Validation Checklist
 

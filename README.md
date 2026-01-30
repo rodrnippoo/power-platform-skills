@@ -1,6 +1,16 @@
 # Power Platform Claude Plugins
 
-Official Claude Code extensions for Power Platform development by Microsoft.
+Official Copilot CLI extensions for Power Platform development by Microsoft.
+
+[![Launch with Copilot CLI](https://img.shields.io/badge/Launch%20with-Copilot%20CLI-000000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/microsoft/power-platform-claude-plugins#quick-start)
+
+## Quick Start
+
+Run this command in your terminal to clone and launch Copilot CLI with the Power Pages plugin:
+
+```bash
+git clone https://github.com/microsoft/power-platform-claude-plugins.git && copilot --plugin-dir power-platform-claude-plugins/plugins/power-pages
+```
 
 ## Overview
 
@@ -42,13 +52,13 @@ To use a plugin from this marketplace:
 1. Add the marketplace to your Claude Code instance
 
     ```bash
-    /plugin marketplace add microsoft/power-platform-claude-plugin
+    /plugin marketplace add microsoft/power-platform-claude-plugins
     ```
 
 2. Install the desired plugin
 
     ```bash
-    /plugin install power-pages@power-platform-claude-plugin
+    /plugin install power-pages@power-platform-claude-plugins
     ```
 
 ### Add from local path
@@ -57,13 +67,13 @@ To use a plugin from this marketplace:
 1. Add the marketplace to your Claude Code instance
 
     ```bash
-    /plugin marketplace add /path/to/power-platform-claude-plugin
+    /plugin marketplace add /path/to/power-platform-claude-plugins
     ```
 
 1. Install the desired plugin (installs to user scope by default)
 
     ```bash
-    /plugin install power-pages@power-platform-claude-plugin
+    /plugin install power-pages@power-platform-claude-plugins
     ```
 
 ## Local Development
