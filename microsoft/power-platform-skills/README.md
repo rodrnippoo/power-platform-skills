@@ -6,3 +6,5 @@
 
 **Latest report PDF**: [report.pdf](https://github.com/microsoft/power-platform-skills/raw/github-repo-stats/microsoft/power-platform-skills/latest-report/report.pdf)
 
+
+**Latest report HTML via GitHub pages**: [report.html](https://microsoft.github.io/power-platform-skills/microsoft/power-platform-skills/latest-report/report.html)
