@@ -15,8 +15,6 @@ tools:
   - Grep
   - Glob
   - Bash
-  - EnterPlanMode
-  - ExitPlanMode
   - mcp__plugin_power-pages_playwright__browser_navigate
   - mcp__plugin_power-pages_playwright__browser_take_screenshot
   - mcp__plugin_power-pages_playwright__browser_wait_for
@@ -252,69 +250,46 @@ Follow these conventions:
 - Show cardinality: `||--o{` (one-to-many), `||--||` (one-to-one), `}o--o{` (many-to-many)
 - Include all proposed tables (new, modified, and reused)
 
-### 4.5 Render ER Diagram Visually
+### 4.5 Render Quick Preview (Optional)
 
-**Do this BEFORE entering plan mode.** Render the Mermaid ER diagram in the browser so the user can see it while reviewing the plan.
+Render a static preview of the ER diagram in the browser so the user gets a first look while the full interactive editor is prepared by the main skill in Phase 4.
 
-1. Write a temporary HTML file to the **system temp directory** (NOT the project directory — avoid polluting the repo):
+1. Write the Mermaid HTML to the system temp directory:
 
 ```powershell
-# Get the temp directory path
 $tempDir = [System.IO.Path]::GetTempPath()
-# File path: $tempDir/er-diagram.html
+$htmlPath = Join-Path $tempDir "er-preview.html"
 ```
 
-HTML template:
+Use this HTML template (substitute the Mermaid diagram code into the `<pre>` block):
 
 ```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ER Diagram</title>
+  <title>ER Diagram Preview</title>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <style>
-    body {
-      background: #ffffff;
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-      margin: 0;
-      padding: 40px;
-      font-family: system-ui, sans-serif;
-    }
-    .mermaid {
-      width: 100%;
-      min-width: 1200px;
-    }
-    .mermaid svg {
-      width: 100% !important;
-      height: auto !important;
-    }
+    body { background:#fff; display:flex; justify-content:center; padding:32px;
+           font-family:system-ui,sans-serif; margin:0 }
+    .mermaid { min-width:1200px }
+    .mermaid svg { width:100%!important; height:auto!important }
   </style>
 </head>
 <body>
-  <pre class="mermaid">
-    <!-- paste the Mermaid erDiagram code here -->
-  </pre>
-  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', er: { fontSize: 16, useMaxWidth: false } });</script>
+  <pre class="mermaid"><!-- MERMAID CODE HERE --></pre>
+  <script>mermaid.initialize({ startOnLoad:true, theme:'default',
+    er:{ fontSize:15, useMaxWidth:false } });</script>
 </body>
 </html>
 ```
 
-2. **Resize the browser** to a large viewport for a legible diagram:
+2. Resize the Playwright browser to **width: 1600, height: 900**.
+3. Navigate to `file:///` + the path (convert backslashes to forward slashes on Windows).
+4. Wait for the `svg` element; take a full-page screenshot.
 
-Use `browser_resize` with **width: 1920** and **height: 1080** before navigating.
-
-3. Navigate Playwright to the file using a `file:///` URL:
-   - On Windows: `file:///C:/Users/<user>/AppData/Local/Temp/er-diagram.html`
-   - Convert backslashes to forward slashes in the path
-
-4. Wait for the diagram to render (wait for the `svg` element to appear, or wait ~3 seconds).
-
-5. Take a **full-page screenshot** using `browser_take_screenshot` with `fullPage: true` — this captures the entire diagram regardless of viewport height. The browser window also remains open so the user can view and interact with it directly.
-
-If Playwright fails to launch or navigate, fall back to printing an ASCII ER diagram directly in the conversation. Use box-drawing characters to represent tables and arrows for relationships:
+If Playwright is unavailable, print an ASCII ER diagram in the conversation instead:
 
 ```
 ┌──────────────────────┐       ┌──────────────────────────┐
@@ -324,41 +299,31 @@ If Playwright fails to launch or navigate, fall back to printing an ASCII ER dia
 │    fullname          │───┐   │ FK cr123_contactid       │
 │    emailaddress1     │   │   │    cr123_ordernumber     │
 └──────────────────────┘   │   │    cr123_totalamount     │
-                           │   └──────────────────────────┘
-                           │              ▲
-                           └──────────────┘
+                           └──────────────────────────────┘
                             1           many
 ```
 
-Follow these conventions for the ASCII diagram:
-- Use `┌─┐│└─┘` box-drawing characters for table borders
-- Show `PK` and `FK` prefixes for key columns
-- Use `───` lines and `▲` arrows to show relationships
-- Label cardinality (`1`, `many`) near the connection points
-- Keep tables aligned horizontally or vertically for readability
+### 4.6 Recommendations
 
-### 4.6 Recommendations & Next Steps
+Include any suggestions for:
+- Indexes or alternate keys for frequently queried columns
+- Security roles or record-ownership patterns
+- Standard Dataverse tables to reuse (Contact, Account, etc.) where applicable
+- Note any discovery steps skipped due to auth errors
 
-End the plan with:
-- Any suggestions for indexes, alternate keys, or security roles
-- Note which discovery steps were skipped (if any) due to auth errors
-- State that the main agent will use this proposal to create the tables in Dataverse
-
-### 4.7 Enter Plan Mode & Exit
-
-Use `EnterPlanMode` to present the complete proposal (sections 4.1–4.4 and 4.6) to the user. Then use `ExitPlanMode` for user review and approval.
+**Do NOT enter plan mode.** The main skill (setup-datamodel Phase 4) will launch the interactive ER diagram editor where the user reviews, edits, and approves the proposal. Return the structured output directly.
 
 ---
 
 ## Step 5: Clean Up
 
-After the user approves the plan, delete the temporary `er-diagram.html` file from the system temp directory if it was created.
+Delete the temporary preview HTML file from the system temp directory if it was created (e.g., `er-preview.html`). Do NOT delete `/tmp/er-input.json` — the main skill needs it.
 
 ---
 
 ## Step 6: Return Structured Output
 
-After the user approves the plan, return the complete proposal back to the calling context. The output **must** include both logical names and display names for every table and column, so the main agent can create them in Dataverse. Structure the return as:
+Return the complete proposal to the calling skill. The main skill (setup-datamodel) will launch the interactive ER diagram editor using this data, where the user can make further refinements before approving. The output **must** include both logical names and display names for every table and column. Structure the return as:
 
 1. **Publisher Prefix**: The prefix string (e.g., `cr123`)
 2. **Tables**: Array of table objects, each with `logicalName`, `displayName`, `status` (new/modified/reused), `columns` (each with `logicalName`, `displayName`, `type`, `required`), and `relationships`

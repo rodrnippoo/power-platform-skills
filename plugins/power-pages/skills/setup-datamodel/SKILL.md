@@ -7,7 +7,7 @@ description: >
   or wants to create Dataverse tables, columns, and relationships for their
   Power Pages site based on a data model proposal.
 user-invocable: true
-allowed-tools: Read, Write, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_code_sample_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch
+allowed-tools: Read, Write, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_code_sample_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__plugin_power-pages_playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_take_screenshot, mcp__plugin_power-pages_playwright__browser_wait_for, mcp__plugin_power-pages_playwright__browser_resize
 model: opus
 hooks:
   Stop:
@@ -130,37 +130,169 @@ If the user chooses to let the Data Model Architect figure it out, proceed to **
 
 ---
 
-## Phase 4: Review Proposal
+## Phase 4: Interactive ER Diagram Review
 
-**Goal**: Present the data model proposal to the user and get explicit approval before creating anything
+**Goal**: Launch the interactive ER diagram editor in the browser so the user can visually review, refine, and approve the data model before any Dataverse changes are made.
+
+The editor is a rich single-page application with a three-panel layout:
+- **Left** — searchable entity/relationship explorer with add/delete actions
+- **Center** — live Mermaid ER diagram with zoom, pan, and view modes (Visual / Code / Split)
+- **Right** — context-sensitive property editor for the selected table, column, or relationship
 
 **Actions**:
 
-### 4.1 Present Proposal
+### 4.1 Write Input File
 
-Present the data model proposal directly to the user as a formatted message, including:
+Write the data model returned by the agent (or parsed from the user's upload) to a temp JSON file.
+The model must follow this structure:
 
-- Publisher prefix
-- All proposed tables with columns (logical names + display names)
-- Relationship descriptions
-- Mermaid ER diagram
-- Which tables are new vs. modified vs. reused
+```json
+{
+  "publisherPrefix": "<prefix>",
+  "tables": [
+    {
+      "id": "<uuid>",
+      "logicalName": "<prefix>_tablename",
+      "displayName": "Table Display Name",
+      "description": "",
+      "status": "new",
+      "columns": [
+        {
+          "id": "<uuid>",
+          "logicalName": "<prefix>_columnname",
+          "displayName": "Column Name",
+          "type": "SingleLine.Text",
+          "required": true,
+          "maxLength": 100,
+          "description": ""
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "id": "<uuid>",
+      "type": "1:N",
+      "referencedTable": "<from_logical_name>",
+      "referencingTable": "<to_logical_name>",
+      "referencingAttribute": "<prefix>_fkcolumnid",
+      "label": "has"
+    }
+  ],
+  "mermaidDiagram": ""
+}
+```
 
-### 4.2 Get User Approval
+Use the `Write` tool to create this file:
 
-Use `AskUserQuestion` to get approval:
+```
+File path: /tmp/er-input.json
+Contents:  the JSON above, populated from the agent's proposal
+```
 
-| Question | Header | Options |
-|----------|--------|---------|
-| Does this data model look correct? | Data Model Proposal | Approve and create tables (Recommended), Request changes, Cancel |
+Also clean up any previous run's files:
 
-- **If "Approve and create tables (Recommended)"**: Proceed to Phase 5
-- **If "Request changes"**: Ask what they want changed, modify the proposal, and re-present for approval
-- **If "Cancel"**: Stop the skill
+```bash
+rm -f /tmp/er-approved.json /tmp/er-editor-port.txt
+```
 
-Only proceed to creation after explicit user approval.
+### 4.2 Launch the Editor Server
 
-**Output**: User-approved data model proposal
+Start the interactive editor server in the background using bash:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/setup-datamodel/scripts/launch-er-editor.js" \
+  /tmp/er-input.json \
+  /tmp/er-approved.json \
+  /tmp/er-editor-port.txt &
+```
+
+Then wait for the server to be ready (it writes its port to the port file):
+
+```bash
+for i in $(seq 1 30); do
+  if [ -f /tmp/er-editor-port.txt ]; then break; fi
+  sleep 0.5
+done
+EDITOR_PORT=$(cat /tmp/er-editor-port.txt)
+echo "Editor URL: http://127.0.0.1:$EDITOR_PORT"
+```
+
+### 4.3 Open in Browser
+
+Use Playwright to navigate to the editor:
+
+1. Resize the browser viewport for a wide layout: **width: 1600, height: 900**
+2. Navigate to `http://127.0.0.1/<EDITOR_PORT>` (use the port from the port file)
+3. Wait for the page to fully load (wait for selector `#approve-btn`)
+4. Take a screenshot to confirm the editor opened correctly
+
+Inform the user:
+
+> "The interactive ER diagram editor is now open in your browser. You can:
+> - Click any table in the left panel to edit its properties
+> - Add or remove tables, columns, and relationships
+> - Switch between Visual, Code, and Split views
+> - Use Ctrl+Z / Ctrl+Y to undo/redo changes
+> - When you're satisfied, click **Approve & Create Tables** in the editor"
+
+### 4.4 Wait for User Approval
+
+Poll for the approved output file. The editor server writes this file and exits when the user clicks Approve, or exits with code 2 if the user clicks Cancel.
+
+```bash
+APPROVED=false
+for i in $(seq 1 120); do
+  if [ -f /tmp/er-approved.json ]; then
+    APPROVED=true
+    break
+  fi
+  sleep 5
+done
+
+if [ "$APPROVED" = "false" ]; then
+  echo "TIMEOUT"
+else
+  echo "APPROVED"
+  cat /tmp/er-approved.json
+fi
+```
+
+- **If `APPROVED`**: Read `/tmp/er-approved.json` and use it as the authoritative data model for Phases 5–8
+- **If `TIMEOUT`** (10 minutes elapsed): Use `AskUserQuestion` to ask if the user is still reviewing, then resume polling or cancel
+- **If the server process exits with code 2** (user clicked Cancel): Stop the skill gracefully
+
+### 4.5 Read Approved Model
+
+Use the `Read` tool to load the approved data model:
+
+```
+Read: /tmp/er-approved.json
+```
+
+Extract from it:
+- `publisherPrefix` — used for all new table/column logical names
+- `tables` — the final list of tables with their columns and status (new/modified/reused)
+- `relationships` — the final list of relationships to create
+- `mermaidDiagram` — the final Mermaid ER diagram (for documentation)
+
+Use these values for all subsequent phases. The approved model supersedes any earlier proposal.
+
+### 4.6 Confirm with User
+
+Present a brief summary of the approved model to the user in chat:
+
+```
+✅ Data model approved:
+  • X new tables to create
+  • Y tables to modify (add columns)
+  • Z tables to reuse as-is
+  • N relationships to create
+
+Proceeding to pre-creation checks…
+```
+
+**Output**: User-approved data model read from `/tmp/er-approved.json`, ready for Phase 5
 
 ---
 
