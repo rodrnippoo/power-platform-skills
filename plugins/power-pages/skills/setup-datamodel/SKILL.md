@@ -9,20 +9,6 @@ description: >
 user-invocable: true
 allowed-tools: Read, Write, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_code_sample_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch
 model: opus
-hooks:
-  Stop:
-    - hooks:
-        - type: command
-          command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/setup-datamodel/scripts/validate-datamodel.js"'
-          timeout: 30
-        - type: prompt
-          prompt: >
-            If a Dataverse data model was being set up in this session (via /power-pages:setup-datamodel),
-            verify before allowing stop: 1) A data model was obtained (either the data-model-architect agent
-            was invoked OR the user uploaded an existing ER diagram that was parsed), 2) The user approved
-            the proposal, 3) All approved tables were created, 4) A summary was presented.
-            If incomplete, return { "ok": false, "reason": "<specific issues>" }. Otherwise return { "ok": true }.
-          timeout: 30
 ---
 
 # Set Up Dataverse Data Model
@@ -44,6 +30,7 @@ Guide the user through creating Dataverse tables, columns, and relationships for
 **Goal**: Confirm PAC CLI authentication, acquire an Azure CLI token, and verify API access
 
 **Actions**:
+
 1. Create todo list with all 8 phases (see [Progress Tracking](#progress-tracking) table)
 2. Follow the prerequisite steps in `${CLAUDE_PLUGIN_ROOT}/references/dataverse-prerequisites.md` to verify PAC CLI auth, acquire an Azure CLI token, and confirm API access. Store the environment URL as `$envUrl`.
 
@@ -56,6 +43,7 @@ Guide the user through creating Dataverse tables, columns, and relationships for
 **Goal**: Determine whether the user will upload an existing ER diagram or let AI analyze the site
 
 **Actions**:
+
 1. Ask the user how they want to define the data model using the `AskUserQuestion` tool:
 
    **Question**: "How would you like to define the data model for your site?"
@@ -101,6 +89,7 @@ If the user chooses to let the Data Model Architect figure it out, proceed to **
 **Goal**: Spawn the data-model-architect agent to autonomously analyze the site and propose a data model
 
 **Actions**:
+
 1. Use the `Task` tool to spawn the `data-model-architect` agent. This agent autonomously:
    - Analyzes the site's source code to infer data requirements
    - Queries existing Dataverse tables via OData GET requests
@@ -172,19 +161,18 @@ Only proceed to creation after explicit user approval.
 
 ### 5.1 Refresh Token
 
-Re-acquire the Azure CLI token (tokens expire after ~60 minutes):
+Re-acquire the auth token (tokens expire after ~60 minutes):
 
-```powershell
-$token = az account get-access-token --resource "$envUrl" --query accessToken -o tsv
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-dataverse-access.js" <envUrl>
 ```
 
 ### 5.2 Query Existing Tables
 
 For each table in the approved proposal marked as `new`, check whether it already exists:
 
-```powershell
-$headers = @{ Authorization = "Bearer $token"; Accept = "application/json" }
-Invoke-RestMethod -Uri "$envUrl/api/data/v9.2/EntityDefinitions(LogicalName='<table_logical_name>')" -Headers $headers
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/dataverse-request.js" <envUrl> GET "api/data/v9.2/EntityDefinitions(LogicalName='<table_logical_name>')"
 ```
 
 - **If 404**: Table does not exist, proceed to create it
@@ -219,14 +207,8 @@ Refer to `references/odata-api-patterns.md` for full JSON body templates.
 
 For each new table, POST to the EntityDefinitions endpoint:
 
-```powershell
-$body = <JSON body from references/odata-api-patterns.md>
-$headers = @{
-  Authorization = "Bearer $token"
-  "Content-Type" = "application/json"
-  Accept = "application/json"
-}
-Invoke-RestMethod -Method Post -Uri "$envUrl/api/data/v9.2/EntityDefinitions" -Headers $headers -Body $body
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/dataverse-request.js" <envUrl> POST "api/data/v9.2/EntityDefinitions" --body '<JSON body from references/odata-api-patterns.md>'
 ```
 
 Use the deep-insert pattern to create the table and its columns in a single POST request. See `references/odata-api-patterns.md` for the complete JSON structure.
@@ -235,9 +217,8 @@ Use the deep-insert pattern to create the table and its columns in a single POST
 
 For tables marked as `modified`, add new columns one at a time:
 
-```powershell
-$body = <column JSON from references/odata-api-patterns.md>
-Invoke-RestMethod -Method Post -Uri "$envUrl/api/data/v9.2/EntityDefinitions(LogicalName='<table>')/Attributes" -Headers $headers -Body $body
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/dataverse-request.js" <envUrl> POST "api/data/v9.2/EntityDefinitions(LogicalName='<table>')/Attributes" --body '<column JSON from references/odata-api-patterns.md>'
 ```
 
 ### 6.3 Track Progress
@@ -246,11 +227,7 @@ Track each creation attempt and its result (success/failure/skipped). Do NOT att
 
 ### 6.4 Refresh Token if Needed
 
-If creating many tables, refresh the token between batches (every 3–4 tables) to avoid expiration:
-
-```powershell
-$token = az account get-access-token --resource "$envUrl" --query accessToken -o tsv
-```
+If creating many tables, the `dataverse-request.js` script handles 401 token refresh automatically. No manual refresh is needed between batches.
 
 **Output**: All approved tables and columns created (or failures reported)
 
@@ -266,18 +243,16 @@ $token = az account get-access-token --resource "$envUrl" --query accessToken -o
 
 Create lookup columns that establish 1:N relationships:
 
-```powershell
-$body = <relationship JSON from references/odata-api-patterns.md>
-Invoke-RestMethod -Method Post -Uri "$envUrl/api/data/v9.2/RelationshipDefinitions" -Headers $headers -Body $body
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/dataverse-request.js" <envUrl> POST "api/data/v9.2/RelationshipDefinitions" --body '<relationship JSON from references/odata-api-patterns.md>'
 ```
 
 ### 7.2 Many-to-Many Relationships
 
 Create M:N relationships (intersect tables are created automatically):
 
-```powershell
-$body = <M:N relationship JSON from references/odata-api-patterns.md>
-Invoke-RestMethod -Method Post -Uri "$envUrl/api/data/v9.2/RelationshipDefinitions" -Headers $headers -Body $body
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/dataverse-request.js" <envUrl> POST "api/data/v9.2/RelationshipDefinitions" --body '<M:N relationship JSON from references/odata-api-patterns.md>'
 ```
 
 ### 7.3 Track Relationship Creation
@@ -298,12 +273,8 @@ Track each relationship creation attempt. Report failures without rolling back.
 
 Publish all customizations so the new tables and columns become available:
 
-```powershell
-$publishBody = @{
-  ParameterXml = "<importexportxml><entities><entity>$( ($tables | ForEach-Object { $_.logicalName }) -join '</entity><entity>' )</entity></entities></importexportxml>"
-} | ConvertTo-Json
-
-Invoke-RestMethod -Method Post -Uri "$envUrl/api/data/v9.2/PublishXml" -Headers $headers -Body $publishBody -ContentType "application/json"
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/dataverse-request.js" <envUrl> POST "api/data/v9.2/PublishXml" --body '{"ParameterXml":"<importexportxml><entities><entity>cr123_project</entity><entity>cr123_task</entity></entities></importexportxml>"}'
 ```
 
 See `references/odata-api-patterns.md` for the full PublishXml pattern.
@@ -312,8 +283,8 @@ See `references/odata-api-patterns.md` for the full PublishXml pattern.
 
 For each created table, run a verification query:
 
-```powershell
-Invoke-RestMethod -Uri "$envUrl/api/data/v9.2/EntityDefinitions(LogicalName='<table>')?`$select=LogicalName,DisplayName" -Headers $headers
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/dataverse-request.js" <envUrl> GET "api/data/v9.2/EntityDefinitions(LogicalName='<table>')?$select=LogicalName,DisplayName"
 ```
 
 ### 8.3 Write Manifest
@@ -356,6 +327,7 @@ Present a summary to the user:
 | `cr123_task` (Task) | Created | 4 columns | 1 relationship |
 
 Include:
+
 - Total tables created/modified/reused/failed
 - Total columns created/skipped/failed
 - Total relationships created/failed
@@ -365,11 +337,12 @@ Include:
 ### 8.6 Suggest Next Steps
 
 After the summary, suggest:
+
 - Review created tables in the Power Pages maker portal
-- Populate tables with sample data for testing: `/power-pages:add-sample-data`
-- Integrate tables with your site's frontend via Web API: `/power-pages:integrate-webapi`
-- If the site is not yet built: `/power-pages:create-site`
-- If the site is ready to deploy: `/power-pages:deploy-site`
+- Populate tables with sample data for testing: `/add-sample-data`
+- Integrate tables with your site's frontend via Web API: `/integrate-webapi`
+- If the site is not yet built: `/create-site`
+- If the site is ready to deploy: `/deploy-site`
 
 **Output**: Published customizations, verified tables, manifest written, summary presented
 
@@ -381,7 +354,7 @@ After the summary, suggest:
 
 - **Use TaskCreate/TaskUpdate** to track progress at every phase
 - **Ask for user confirmation** at key decision points (see list below)
-- **Refresh tokens proactively** — re-acquire the Azure CLI token before any batch of API calls, especially if more than a few minutes have passed
+- **Token refresh is automatic** — the `dataverse-request.js` script handles 401 token refresh and 429/5xx retry internally
 - **Report failures without rollback** — track each creation attempt and continue with remaining items on failure
 
 ### Key Decision Points (Wait for User)

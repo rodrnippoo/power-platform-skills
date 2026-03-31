@@ -1,22 +1,24 @@
-# AGENTS.md — Power Pages Plugin
-
-This file provides guidance to AI Agents when working with the **power-pages** plugin.
-
-## What This Plugin Is
+# Power Pages Plugin
 
 A plugin for creating, deploying, and managing Power Pages code sites. Supports static SPA frameworks (React, Vue, Angular, Astro) with Dataverse integration, Web API access, browser-based previews via Playwright, and full ALM (Application Lifecycle Management) with Dataverse solutions and CI/CD pipelines.
 
-## Local Development
+**Server-rendered frameworks (Next.js, Nuxt, Remix, SvelteKit) are NOT supported.**
 
-Test this plugin locally:
+Read `PLUGIN_DEVELOPMENT_GUIDE.md` for UX and reliability standards when creating new skills and agents.
 
-```bash
-claude --plugin-dir /path/to/plugins/power-pages
-```
+## Key Conventions
 
-Each framework template under `skills/create-site/assets/{react,vue,angular,astro}/` has its own `package.json` with `dev`, `build`, and `preview` scripts (Vite for React/Vue, Angular CLI for Angular, Astro CLI for Astro).
+- **DRY** — Never duplicate logic. Shared scripts live in `scripts/` (e.g., `generate-uuid.js`, `scripts/lib/validation-helpers.js`). Shared reference docs live in `references/`. Always check for existing helpers before writing new code.
+- **Validation scripts** must import from `scripts/lib/validation-helpers.js` for boilerplate, path finders, auth helpers, and constants.
+- **UUID generation** must use the shared `scripts/generate-uuid.js` — never copy it into skill-specific directories.
+- **Power Pages config loading** must reuse `scripts/lib/powerpages-config.js` anywhere a script reads `.powerpages-site` table-permission or site-setting YAML. Keep that module focused on loading/parsing code-site config only; put validation or business rules in separate validator modules.
+- **Script changes require tests** — Whenever you add a new script or modify an existing script, add or update `node:test` coverage under `scripts/tests/`. Prefer one `*.test.js` file per script/module being tested, and keep the PowerShell test command passing: `$files = Get-ChildItem .\plugins\power-pages\scripts\tests\*.test.js | ForEach-Object { $_.FullName }` followed by `node --test $files`. Validator changes are not an exception; they must always ship with test coverage.
+- **Dataverse-backed validation** must stay opt-in for local runs only. Do not require live Dataverse connectivity in CI workflows or default test runs; gate it behind explicit local flags such as `--validate-dataverse-relationships`.
+- **Reference docs** shared across skills live in `references/` — reference via `${CLAUDE_PLUGIN_ROOT}/references/` paths, don't duplicate.
+- **Templates** use `__PLACEHOLDER__` tokens (e.g., `__SITE_NAME__`) replaced during scaffolding. The `gitignore` file is stored without the dot prefix and renamed to `.gitignore` during scaffolding.
+- **Hooks** are defined centrally in `hooks/hooks.json`, using `PostToolUse` with matcher `Skill` so validation runs when a tracked Power Pages skill completes.
 
-## Architecture
+## Skill Development Conventions
 
 ```
 .claude-plugin/plugin.json     ← Plugin metadata (name, version, keywords)
@@ -240,146 +242,39 @@ All skills in this plugin follow a consistent set of patterns. When creating a n
 
 ### Phase-Wise Workflow
 
-Every skill is structured as a sequence of **phases** (typically 5–8). Each phase has a single, clear goal and an explicit output statement describing what it delivers. Phases execute sequentially — never skip or reorder them.
+Every skill is a sequence of phases (typically 5-8): Prerequisites, Discover/Gather, Plan/Review, Implement, **Verify** (mandatory standalone phase), Deploy/Summarize. Never skip or reorder phases.
 
-A typical phase sequence looks like:
+### Task Tracking
 
-1. **Prerequisites / Verify** — Confirm tools, auth, project structure exist
-2. **Discover / Gather** — Collect user input, analyze existing code/state
-3. **Plan / Review** — Present a plan and get user approval before proceeding
-4. **Implement / Create** — Do the actual work (create files, call APIs, scaffold)
-5. **Verify** (**mandatory**) — Validate the output: confirm files exist, formats are correct, project builds, UI renders
-6. **Deploy / Summarize** — Offer deployment and present a summary with next steps
-
-**Every skill must have a dedicated verification phase.** This is not optional. The verification phase must be a standalone phase (not a substep buried inside another phase) and must appear after the implementation work is complete but before the final review/deploy phase. What verification checks depends on the skill:
-
-- **File-creating skills**: Verify files exist, formats are valid, no unreplaced placeholders, project builds
-- **API-calling skills**: Verify records/resources were created by querying them back, present success/failure counts
-- **Deployment skills**: Verify deployment artifacts exist (e.g., `.powerpages-site` folder), confirm command output reported success
-- **UI-creating skills**: Verify the project builds and the new UI renders correctly via Playwright
-
-### Task Tracking (To Do List)
-
-Every skill uses `TaskCreate`, `TaskUpdate`, and `TaskList` to track progress:
-
-1. **Create all tasks upfront** — At the very start of Phase 1, before any work begins, create one task per phase using `TaskCreate`. The user sees the full scope immediately. Never add tasks incrementally mid-workflow.
-2. **Task fields** — Each task must include:
-   - `subject`: Imperative form (e.g., "Verify prerequisites")
-   - `activeForm`: Present continuous form shown in spinner (e.g., "Verifying prerequisites")
-   - `description`: Detailed description of what the phase does and its acceptance criteria
-3. **Task lifecycle** — Mark each task `in_progress` via `TaskUpdate` when starting the phase, then `completed` when the phase finishes. Progress through tasks sequentially.
-4. **Progress tracking table** — Include a table at the end of the SKILL.md listing all tasks with their `subject`, `activeForm`, and `description` fields. This serves as the reference for task creation.
-
-Example:
-
-```
-| Task subject | activeForm | Description |
-|---|---|---|
-| Verify prerequisites | Verifying prerequisites | Confirm PAC CLI auth, acquire Azure CLI token, verify API access |
-| Gather configuration | Gathering configuration | Collect user input for site name, options, preferences |
-| ... | ... | ... |
-```
+Create all tasks upfront at Phase 1 start using `TaskCreate` (one per phase). Each task needs `subject` (imperative), `activeForm` (present continuous for spinner), and `description`. Mark `in_progress` when starting, `completed` when done. Include a progress tracking table at the end of the SKILL.md.
 
 ### SKILL.md Frontmatter
 
-Every SKILL.md starts with YAML frontmatter following this structure:
-
 ```yaml
 ---
-name: <skill-name>              # kebab-case identifier
-description: >-                  # User-facing description listing trigger phrases
-  <when to use this skill and synonym phrases>
+name: <skill-name>
+description: >-
+  <when to use this skill>
 user-invocable: true
-argument-hint: <optional hint>   # Describes optional argument the user can pass
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate, TaskUpdate, TaskList, AskUserQuestion  # Comma-separated list (not JSON array or YAML list)
+argument-hint: <optional>
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Task, TaskCreate, TaskUpdate, TaskList, AskUserQuestion
 model: opus
-hooks:
-  Stop:
-    - hooks:
-        - type: command
-          command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/<skill-name>/scripts/validate-<skill>.js"'
-          timeout: 30
-        - type: prompt
-          prompt: "<completeness checklist — returns { ok: true } or { ok: false, reason }>"
-          timeout: 30
 ---
 ```
 
-### User Confirmation at Key Decision Points
+Note: `allowed-tools` must be a comma-separated list, not JSON array or YAML list syntax.
 
-Every skill must pause and wait for user input at critical junctures using `AskUserQuestion`. Document these decision points explicitly in the SKILL.md under a **"Key Decision Points (Wait for User)"** section. Common points:
+### Key Patterns
 
-- After gathering requirements — confirm understanding before planning
-- After presenting a plan — get approval before implementation
-- After implementation — accept results or request changes
-- Before deployment — deploy now or later
-
-### Deployment Prompt
-
-Skills that create or modify site artifacts should end with a deployment prompt:
-
-1. Announce completion: "The X has been created/configured locally."
-2. Ask via `AskUserQuestion`: "Ready to deploy?" with options: "Yes, deploy now (Recommended)" / "No, I'll deploy later"
-3. If "Yes" — invoke the `/power-pages:deploy-site` skill
-4. If "No" — remind user: "Run `/power-pages:deploy-site` when ready"
-5. Present a summary and suggest next steps
-
-### Validation Hooks (Stop Hooks)
-
-Every skill that creates files must define two Stop hooks in its frontmatter:
-
-1. **Command hook** — A Node.js validation script (`scripts/validate-<skill>.js`) that verifies artifacts were created correctly (files exist, valid format, no unreplaced placeholders). Must import shared boilerplate from `scripts/lib/validation-helpers.js`. Must gracefully exit 0 when the session didn't involve this skill (e.g., no relevant files detected).
-2. **Prompt hook** — A completeness checklist that returns `{ ok: true }` or `{ ok: false, reason: "..." }`. Lists 4–6 specific conditions that must all be true for the skill to be considered complete.
-
-### Shared Resources (DRY)
-
-Before writing any new logic, check for existing shared utilities and references:
-
-- **Shared references** in `references/` at the plugin root — reuse via `${CLAUDE_PLUGIN_ROOT}/references/` paths
-- **Shared scripts** in `scripts/` — e.g., `generate-uuid.js`, `scripts/lib/validation-helpers.js`
-- **Skill-specific references** go in `skills/<skill-name>/references/` and must point to shared docs for common content rather than duplicating
-
-### Graceful Failure (No Auto-Rollback)
-
-Skills that make API calls must:
-
-- Track each API call result (success/failure/skipped)
-- **Never** attempt automated rollback on failure
-- Report failures clearly and continue with remaining items
-- Present a summary at the end showing what succeeded and what failed
-
-### Token Refresh for Long Operations
-
-Skills that make repeated Dataverse/API calls must refresh the Azure CLI access token periodically — every ~20 records, 3–4 tables, or ~60 seconds — to avoid expiration mid-workflow.
-
-### Git Commits at Milestones
-
-Skills that create or modify source files must commit after every significant milestone:
-
-- After creating each page or component
-- After applying design foundations
-- After each phase that modifies files completes
-
-Each commit should be focused with a clear message describing what was added or changed.
-
-### Agent Spawning
-
-Skills that delegate work to agents (via the `Task` tool) must:
-
-- Process agent invocations **sequentially, not in parallel** — the first invocation may create shared files that subsequent ones depend on
-- Wait for each agent to complete before invoking the next
-- Present agent output to the user for approval before proceeding
-
-## Key Constraint
-
-Only static SPA frameworks are supported (React, Vue, Angular, Astro). Server-rendered frameworks (Next.js, Nuxt, Remix, SvelteKit) are **not** supported.
-
-**DRY (Don't Repeat Yourself):** Never duplicate logic across files. Before writing new code, check for existing shared utilities and patterns:
-
-- **Validation scripts** must import from `scripts/lib/validation-helpers.js` for boilerplate (`approve`, `block`, `runValidation`), path finders (`findPath`, `findProjectRoot`, `findPowerPagesSiteDir`), auth helpers (`getAuthToken`, `getEnvironmentUrl`, `getPacAuthInfo`), and constants (`UUID_REGEX`, `CLOUD_TO_API`). Do not re-implement these in individual scripts.
-- **UUID generation** must use the shared `scripts/generate-uuid.js`. Do not copy it into skill-specific `scripts/` directories.
-- **Reference docs** shared across skills live in `references/` at the plugin root. Do not duplicate OData patterns, prerequisite steps, or framework conventions in skill-specific files — reference the shared docs via `${CLAUDE_PLUGIN_ROOT}/references/`.
-- When adding a new validation script, extend `validation-helpers.js` if the new helper would be useful to other scripts. Keep skill-specific logic in the individual script, shared logic in the library.
+- **User confirmation** — Pause with `AskUserQuestion` after gathering requirements, after presenting a plan, after implementation, and before deployment.
+- **Deployment prompt** — Skills that modify site artifacts should end by asking "Ready to deploy?" and invoke `/deploy-site` if yes.
+- **Lifecycle hooks** — If a skill needs command validation or checklist enforcement, update `hooks/hooks.json` and `scripts/lib/powerpages-hook-utils.js`. Do not define hook registration in individual `SKILL.md` files.
+- **Graceful failure** — Track API call results, never auto-rollback, report failures clearly, continue with remaining items.
+- **Token refresh** — Refresh Azure CLI token every ~20 records / 3-4 tables / ~60 seconds.
+- **Git commits** — Commit after every significant milestone (each page/component, design foundations, phase completion).
+- **Agent spawning** — Process sequentially (not parallel), wait for completion, present output for approval.
+- **Skill tracking** — Every skill must record usage in its final phase via `> Reference: ${CLAUDE_PLUGIN_ROOT}/references/skill-tracking-reference.md` (pointer pattern, not hardcoded command). When adding a new skill, also add its entry to the skill name mapping table in `references/skill-tracking-reference.md`.
+- **Dataverse API calls** — Use deterministic Node.js scripts (in the skill's `scripts/` directory) for Dataverse API queries. Scripts should import `getAuthToken` and `makeRequest` from `scripts/lib/validation-helpers.js`. Never use inline PowerShell `Invoke-RestMethod` for API calls — scripts are more reliable, testable, and cross-platform.
 
 ## Planned Skills (Not Yet Implemented)
 
@@ -398,4 +293,6 @@ The following skills are planned but require POC validation before implementatio
 
 ## Maintaining This File
 
-When you make significant changes to this plugin (new skills, agents, hooks, templates, or architectural shifts), update this file to keep it accurate for future agents.
+Update when plugin structure or conventions change or you learn something which can be useful for new skills or agents.
+
+Keep this file concise — detailed docs belong in `PLUGIN_DEVELOPMENT_GUIDE.md` or individual SKILL.md / agent files.
