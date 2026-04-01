@@ -125,51 +125,165 @@ GET {envUrl}/api/data/v9.2/solutioncomponents?$filter=objectid eq '{anyPowerpage
 ```
 Store result as `subComponentType`.
 
+For **site language records**, query using the site language ID:
+```
+GET {envUrl}/api/data/v9.2/solutioncomponents?$filter=objectid eq '{siteLanguageId}'&$select=componenttype&$top=1
+```
+Store result as `siteLanguageComponentType`. Site language has its own distinct componenttype (~10375) — it is NOT included by `AddRequiredComponents: true` on the website and must be added explicitly.
+
 If the website record query returns an empty `value` array, the site has not been added to any solution yet — stop and inform the user that the site must be deployed (via `/power-pages:deploy-site`) before it can be solutionized. If the sub-component query returns empty, proceed anyway — you will discover all component IDs in Step 5.2.
 
-#### Step 5.2 — Fetch Component Type Labels and All Site Components
+#### Step 5.2 — Discover All Components
 
-**First**, resolve current component type labels from the environment's metadata — this ensures the label map is always up to date regardless of new types Microsoft adds:
+Run four discovery queries in parallel:
+
+**A. Component type labels** (for display names):
 ```
 GET {envUrl}/api/data/v9.2/GlobalOptionSetDefinitions(Name='powerpagecomponenttype')
 ```
-From the response, build a `typeLabel` map: `{ [Value]: Label.UserLocalizedLabel.Label }` for every entry in `Options`. If this query fails or returns an unexpected structure, fall back to the static table in `${CLAUDE_PLUGIN_ROOT}/references/solution-api-patterns.md` Section 3b.
+Build a `typeLabel` map: `{ [Value]: Label.UserLocalizedLabel.Label }`. Fall back to the static table in `${CLAUDE_PLUGIN_ROOT}/references/solution-api-patterns.md` Section 3b if this fails.
 
-**Then**, query all Power Pages sub-components for this site:
+**B. All Power Pages sub-components for this site**:
 ```
 GET {envUrl}/api/data/v9.2/powerpagecomponents
   ?$filter=_powerpagesiteid_value eq '{websiteRecordId}'
   &$select=powerpagecomponentid,name,powerpagecomponenttype
   &$orderby=powerpagecomponenttype
 ```
+Follow `@odata.nextLink` pagination. Group by `powerpagecomponenttype` using `typeLabel` for display names.
 
-Follow `@odata.nextLink` pagination until all pages are fetched. Group results by `powerpagecomponenttype`, count per group, and use `typeLabel[type]` for display. For any type not found in `typeLabel`, display it as `Unknown (N)`.
-
-#### Step 5.3 — User Selection: Which Categories to Include
-
-Present the grouped summary and ask the user which categories to include. All non-sensitive types are pre-selected (default: include). Site Settings (type 9) require explicit opt-in due to security risk.
-
-Example output format:
+**C. Site language records**:
 ```
-Found {N} Power Pages components across {K} categories:
-  ✓ Publishing States (2), Web Pages (10), Web Files (8), Weblink Sets (2),
-    Weblinks (2), Page Templates (4), Content Snippets (11), Web Templates (13),
-    Webpage Rules (2), Web Roles (3), Website Access (2), Site Markers (5)
-  ⚠ Site Settings (49) — may include OAuth secrets (ClientSecret, AppSecret, etc.)
-    Recommended: EXCLUDE from solution to avoid moving credentials across environments.
+GET {envUrl}/api/data/v9.2/powerpagesitelanguages?$filter=_powerpagesiteid_value eq '{websiteRecordId}'&$select=powerpagesitelanguageid,languagecode,displayname
+```
+Store all language IDs.
+
+**D. Dataverse tables** — always discover from the environment, don't rely on a manifest file alone:
+
+1. Read `.datamodel-manifest.json` if present (for the known list of tables created by `setup-datamodel`)
+2. **Also** query the environment directly for all custom unmanaged tables, filtering by the publisher prefix:
+```
+GET {envUrl}/api/data/v9.2/EntityDefinitions?$select=LogicalName,MetadataId,IsManaged,IsCustomEntity
+```
+Filter client-side: `IsCustomEntity === true && IsManaged === false`. Group by publisher prefix (characters before first `_`). Present only tables whose prefix matches the site publisher — or if no prefix match, present all custom unmanaged tables and let the user decide.
+
+> **Important note on tables**: Dataverse solutions carry **schema only** — entity definitions, columns, relationships, forms, and views. Table **data/records** do NOT travel with the solution. If the target environment needs seed/reference data, that requires a separate data migration step.
+
+#### Step 5.3 — Categorize Site Settings
+
+Site Settings (powerpagecomponenttype=9) have distinct security profiles. Split them before presenting:
+
+| Category | Name pattern | Default |
+|---|---|---|
+| Web API settings | `Webapi/*` | **Include** — required for Web API to work in target env |
+| Feature flags | `CodeSite/*`, `Search/*`, `Site/*`, `Profile/*`, `Header/*`, `Footer/*`, `ThemeFeature`, `HTTP/*`, `SiteCopilot/*`, `CustomerSupport/*`, `KnowledgeManagement/*`, `MultiLanguage/*`, `OnlineDomains` | **Include** — safe |
+| Auth config (non-secret) | `Authentication/Registration/*`, `Authentication/OpenIdConnect/*/Caption`, `Authentication/LoginThrottling/*`, `Authentication/LoginTrackingEnabled`, `Authentication/OpenIdConnect/*/RebrandDisclaimerEnabled` | **Include** — safe |
+| OAuth secrets | Any setting whose name contains `Secret`, `ClientSecret`, `AppSecret`, `ConsumerSecret`, `AppId`, `ConsumerKey` (social provider credentials) | **Exclude by default** |
+
+#### Step 5.4 — OAuth Secrets: Convert to Environment Variables?
+
+Before presenting the final manifest, handle the excluded OAuth secrets. These settings won't travel in the solution — but the user can choose to convert any or all of them to environment variables instead, so they are tracked in the solution schema and injected per environment at deploy time.
+
+**Ask via `AskUserQuestion` with `multiSelect: true`**, listing each excluded OAuth secret by name:
+
+> "These OAuth secret site settings will be excluded from the solution. Select any you'd like to convert to environment variables instead (env var definitions will be added to the solution; you'll link each one via the Power Pages Management UI after). Leave all unselected to just exclude them."
+
+- One option per secret (e.g. `Authentication/OpenAuth/Microsoft/ClientSecret`)
+- Plus options: **"Convert all of them"** and **"Exclude all (don't convert any)"**
+
+For each secret the user selects to convert:
+1. Create an `environmentvariabledefinition` via OData POST:
+   ```
+   POST {envUrl}/api/data/v9.2/environmentvariabledefinitions
+   { "schemaname": "{prefix}_{sanitizedSettingName}", "displayname": "{friendlyName}", "type": 100000003, "defaultvalue": "" }
+   ```
+   Use type `100000003` (Secret) so the value is stored encrypted. Schema name: take the setting name, replace `/` with `_`, lowercase, prefix with publisher prefix (e.g. `ids_auth_openauth_microsoft_clientsecret`).
+2. Add the env var definition to the solution (`ComponentType: 380`).
+3. **Link the site setting to the env var via OData PATCH** (HAR-confirmed pattern — no UI step required):
+   ```
+   PATCH {envUrl}/api/data/v9.0/mspp_sitesettings({settingId})
+   Headers: if-match: *, clienthost: Browser, x-ms-app-name: mspp_PowerPageManagement
+   Body: {
+     "mspp_envvar_schema": "{schemaName}",
+     "EnvironmentValue@odata.bind": "/environmentvariabledefinitions({definitionId})",
+     "EnvironmentValue@OData.Community.Display.V1.FormattedValue": "{schemaName}",
+     "mspp_source": 1
+   }
+   ```
+   **Critical:** Must use v9.0 (not v9.2). Navigation property is `EnvironmentValue` (not `mspp_environmentvariable`). Must include `if-match: *` and `clienthost: Browser` headers — omitting them causes 400.
+4. Verify the link: GET the site setting and confirm `mspp_source === 1` and `_mspp_environmentvariable_value` matches the definition ID.
+5. Record each created env var definition ID and setting ID in the manifest.
+
+OAuth secrets the user chose NOT to convert remain excluded — they are simply not added to the solution.
+
+#### Step 5.5 — Present Full Manifest and Get User Confirmation
+
+**This is the key decision point.** Build a full manifest of everything that will be added and present it to the user before writing anything.
+
+If custom tables were discovered, ask via `AskUserQuestion` with `multiSelect: true` **before** showing the final manifest:
+- First option: **"Include all N tables (Recommended)"** — pre-selected default
+- Then one option per table: `{logicalName} ({DisplayName})`
+- Last option: **"Exclude all tables"**
+
+Present as a structured summary:
+
+```
+Here is everything that will be added to solution "{solutionName}":
+
+WEBSITE & LANGUAGE
+  ✓ Website record: {siteName}
+  ✓ Site language(s): English (en-US)
+
+SITE COMPONENTS ({total} components across {K} types)
+  ✓ Publishing States (2)
+  ✓ Web Pages (10)
+  ✓ Web Files (90)         — compiled JS/CSS/HTML assets
+  ✓ Page Templates (5)
+  ✓ Web Templates (13)
+  ✓ Content Snippets (11)
+  ✓ Web Roles (2)
+  ✓ Website Access (6)
+  ✓ Table Permissions (13) — required for Web API authorization in target env
+  ✓ Site Markers (5)
+  ✓ Webpage Rules (2)
+
+SITE SETTINGS (64 included)
+  ✓ Web API settings (14):   Webapi/crd50_invoice/enabled, ...
+  ✓ Feature flags (32):      CodeSite/Enabled, Search/Enabled, ...
+  ✓ Auth config (18):        Authentication/Registration/LocalLoginEnabled, ...
+  ~ OAuth as env vars (3):   ids_auth_openauth_microsoft_clientsecret, ... [ENV VAR]
+  ✗ OAuth excluded (5):      Authentication/OpenAuth/Facebook/AppSecret, ... [EXCLUDED]
+
+DATAVERSE TABLES (schema only — no data)
+  ✓ crd50_invoice (Invoice)
+  ...
+
+ENV VAR DEFINITIONS (componenttype 380)
+  ✓ ids_auth_openauth_microsoft_clientsecret (Secret)
+  ...
+
+Total to add: ~{N} components
 ```
 
-Ask via `AskUserQuestion`: "Include Site Settings in the solution?" — Options: "Yes, include them" / "No, exclude them (Recommended)"
+Ask via `AskUserQuestion`:
+> "Does this look right? You can proceed, or tell me which categories or tables to exclude."
 
-Default: **exclude** site settings.
+Options: "Proceed with this selection" / "I want to change something"
 
-#### Step 5.4 — Add All Selected Components
+Wait for explicit confirmation before Step 5.6.
 
-1. **Website record** — call `AddSolutionComponent` with `websiteComponentType` and `AddRequiredComponents: true`
-2. **All selected sub-components** — for each `powerpagecomponenttype` group the user selected, call `AddSolutionComponent` for every component in that group using `subComponentType`
-3. Refresh token every ~20 calls to avoid expiration
-4. Track results per component: success / skipped-duplicate / failed
-5. Present running progress (e.g., "Added 45 of 98 components...")
+#### Step 5.6 — Add All Confirmed Components
+
+1. **Website record** — `AddSolutionComponent` with `websiteComponentType`, `AddRequiredComponents: true`
+2. **Site language records** — `AddSolutionComponent` for each with `siteLanguageComponentType` (NOT auto-included by AddRequiredComponents)
+3. **All confirmed powerpagecomponent groups** — for each group, call `AddSolutionComponent` per component using `subComponentType`
+   - Table Permissions (type 18) are standard powerpagecomponents — include by default
+   - Exclude OAuth secret site settings that were not converted to env vars
+4. **Env var definitions** (for converted OAuth secrets) — `AddSolutionComponent` with `ComponentType: 380`
+5. **Dataverse tables** — `AddSolutionComponent` with `ComponentType: 1` and entity `MetadataId`
+6. Refresh token every ~20 calls
+7. Track: success / skipped-duplicate / failed
+8. Running progress: "Added 45 of 120 components..."
 
 ### Phase 6 — Verify and Write Manifest
 
@@ -191,17 +305,42 @@ Display a summary table:
 | Solution | `{friendlyName}` (`{uniqueName}`, v`{version}`) |
 | Solution ID | `{solutionId}` |
 | Components added | N |
+| Env var definitions added | N (if any OAuth secrets converted) |
 | Manifest written | `.solution-manifest.json` |
 
-**Suggested next steps**:
-- Run `/power-pages:export-solution` to package the solution for deployment
-- Run `/power-pages:setup-pipeline` to create a CI/CD pipeline
+**If any OAuth secrets were converted to env vars**, confirm that each site setting was automatically linked (source=1, envvar ID set). Show a brief confirmation:
+
+```
+OAuth secrets linked to environment variables:
+  ✓ Authentication/OpenAuth/Microsoft/ClientSecret → ids_auth_openauth_microsoft_clientsecret
+  ✓ Authentication/OpenAuth/Twitter/ConsumerSecret → ids_auth_openauth_twitter_consumersecret
+```
+
+Note: Secret values themselves must still be set per environment (in Power Pages Management or via `configure-env-variables`).
+
+**Ask how the user wants to deploy this solution** via `AskUserQuestion`:
+
+> "Your solution is ready. How would you like to deploy it to other environments?"
+
+Options:
+1. **"Use Power Platform Pipelines (Recommended)"** — sets up a pipeline in the PP Pipelines host environment; supports staged deployments, approval gates, and env var overrides per stage. Run `/power-pages:setup-pipeline` next.
+2. **"Export and import manually"** — exports the solution as a zip and imports it directly to a target environment. Simpler for one-off deployments. Run `/power-pages:export-solution` next.
+3. **"I'll decide later"** — shows next step suggestions and exits.
+
+If the user selects **option 1**, immediately invoke `/power-pages:setup-pipeline`.
+If the user selects **option 2**, immediately invoke `/power-pages:export-solution`.
+If the user selects **option 3**, show:
+- Run `/power-pages:setup-pipeline` for automated staged deployments (recommended)
+- Run `/power-pages:export-solution` to export a zip for manual import
+- Run `/power-pages:configure-env-variables` if environment-specific values need to be set per stage
 
 ## Key Decision Points (Wait for User)
 
 1. **Phase 2**: Publisher prefix confirmation — permanent, cannot be changed
 2. **Phase 3**: Reuse vs create confirmation — before any writes
-3. **Phase 5, Step 5.3**: Whether to include Site Settings (type 9) — default is exclude due to OAuth secrets
+3. **Phase 5, Step 5.4**: OAuth secrets — multi-select which (if any) to convert to env vars vs exclude entirely
+4. **Phase 5, Step 5.5**: Full manifest review — user sees everything (website, site language, all component categories, tables, env var definitions) and confirms or adjusts before any components are written
+5. **Phase 7**: Deployment path — PP Pipelines (recommended) vs export/import manually vs decide later
 
 ## Error Handling
 
@@ -218,6 +357,6 @@ Display a summary table:
 | Gather solution configuration | Gathering solution configuration | Collect publisher name, prefix, solution name, version from user — confirm irreversible choices |
 | Check existing publishers and solutions | Checking existing state | Query Dataverse for existing publisher and solution to avoid duplicate creation |
 | Create publisher and solution | Creating publisher and solution | POST publisher and solution to Dataverse OData API, capture IDs |
-| Add site components to solution | Adding site components | Discover all powerpagecomponents, present grouped summary, ask about site settings, call AddSolutionComponent for website record and all selected sub-components |
+| Add site components to solution | Adding site components | Discover website/language/powerpagecomponents/tables, split site settings by category, present full manifest for user confirmation, then call AddSolutionComponent for website, site language(s), all confirmed components, and tables (ComponentType=1) |
 | Verify and write manifest | Verifying solution and writing manifest | Confirm components in solution, write .solution-manifest.json, commit |
 | Present summary | Presenting summary | Show solution details, component count, and next steps |

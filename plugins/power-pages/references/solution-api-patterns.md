@@ -96,9 +96,39 @@ Run this query **twice**: once for `websiteRecordId` (captures `websiteComponent
 | Type | Approximate ComponentType | Notes |
 |---|---|---|
 | Website (PowerPages site) | ~10374 | Resolve via discovery query using `websiteRecordId` |
-| All sub-components (web pages, web files, web roles, site settings, templates, etc.) | ~10373 | One shared componenttype for ALL powerpagecomponents — resolve via discovery query using any `powerpagecomponentid` |
+| All sub-components (web pages, web files, web roles, site settings, templates, table permissions, etc.) | ~10373 | One shared componenttype for ALL powerpagecomponents — resolve via discovery query using any `powerpagecomponentid` |
+| Site language (`powerpagesitelanguage`) | ~10375 | Separate type, NOT included by `AddRequiredComponents: true` — must be added explicitly |
 
-**Add the Website component first** with `AddRequiredComponents: true`. Then add all sub-components individually using `subComponentType` — the `AddRequiredComponents: true` flag does NOT automatically cascade all 100+ sub-components; each must be added explicitly.
+**Add the Website component first** with `AddRequiredComponents: true`. Then add site language records, then all sub-components individually using `subComponentType`. The `AddRequiredComponents: true` flag does NOT automatically cascade sub-components or site languages — each must be added explicitly.
+
+**Site language discovery**:
+```
+GET {envUrl}/api/data/v9.2/powerpagesitelanguages?$filter=_powerpagesiteid_value eq '{websiteRecordId}'&$select=powerpagesitelanguageid,languagecode,displayname
+
+# Discover its componenttype:
+GET {envUrl}/api/data/v9.2/solutioncomponents?$filter=objectid eq '{powerpagesitelanguageid}'&$select=componenttype&$top=1
+```
+
+**Adding Dataverse tables (entities) to the solution**:
+
+Tables are NOT powerpagecomponents — they use `ComponentType: 1` (fixed, not discovered). The component ID is the entity's `MetadataId`:
+
+```
+# Find entity MetadataId by logical name
+GET {envUrl}/api/data/v9.2/EntityDefinitions?$filter=LogicalName eq '{logicalName}'&$select=MetadataId,LogicalName
+
+# Add entity to solution
+POST {envUrl}/api/data/v9.2/AddSolutionComponent
+{
+  "ComponentId": "{MetadataId}",
+  "ComponentType": 1,
+  "SolutionUniqueName": "{solutionUniqueName}",
+  "AddRequiredComponents": false,
+  "DoNotIncludeSubcomponents": false
+}
+```
+
+Read table logical names from `.datamodel-manifest.json` (`tables[].logicalName`). Without the table definitions in the solution, target environments won't have the tables and all Web API calls will return 404.
 
 **Success response**: `200 OK` with empty body or component details.
 
