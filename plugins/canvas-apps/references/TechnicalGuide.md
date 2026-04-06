@@ -368,6 +368,9 @@ App:
 
 ## Best Practices
 
+### App Configuration
+- ✅ Set `App.StartScreen` to the initial landing screen so the app always opens on the intended screen
+
 ### State Management
 - ✅ Initialize all variables in `OnVisible`
 - ✅ Use descriptive variable names
