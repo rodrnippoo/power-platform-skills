@@ -63,6 +63,11 @@ Derive a short folder name from the user's requirements:
 
 ### Phase 1: Plan
 
+**Edit detection:** If the user's prompt clearly describes editing an existing page
+(e.g., "edit", "update", "modify", "change" an existing page), skip Phase 1 entirely
+and go directly to the **Edit Flow** section below. Only invoke the planner for new
+page creation.
+
 Invoke the `genpage-planner` agent using the `Task` tool.
 
 Pass a prompt that includes:

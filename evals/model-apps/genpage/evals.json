@@ -79,8 +79,7 @@
         "Phase 5 (Page Builder): DatePicker (if used) is imported from @fluentui/react-datepicker-compat, not @fluentui/react-components",
         "Phase 5 (Page Builder): Icons use unsized variants (e.g., AddRegular not Add24Regular)",
         "Phase 5 (Page Builder): Generated code is a single .tsx file with export default GeneratedComponent",
-        "Phase 6: Deployment command omits --data-sources flag (mock data page)",
-        "Phase 6: User is asked which app to publish to — no default assumed"
+        "Phase 6: Deployment command omits --data-sources flag (mock data page)"
       ]
     },
     {
@@ -90,24 +89,23 @@
       "files": [],
       "expectations": [
         "A workflow-log.md file is saved documenting all steps attempted",
-        "Edit flow is handled inline by the orchestrator skill — not routed through agents",
-        "Prerequisites are validated (node --version, pac help)",
-        "Authentication is confirmed and environment reported",
-        "pac model list-languages is NOT run (edit flow — existing page already has localization)",
-        "Question 1 identifies this as an edit (not new)",
-        "User is asked for the app and page to edit",
-        "pac model genpage download --app-id <id> --page-id <id> --output-directory is run to download existing code",
-        "The downloaded code is read to understand the current implementation",
-        "User is asked what changes to make (search + sort confirmed)",
-        "A plan is presented describing the changes before modifying code",
-        "If Dataverse entities are used, RuntimeTypes.ts is generated and read to verify column names",
-        "genpage-rules-reference.md is read before modifying code",
-        "Updated code preserves existing functionality while adding search and sort",
-        "Search implementation uses Fluent UI V9 SearchBox or Input component",
-        "Sort implementation uses column header click handlers or Fluent UI sorting",
-        "pac model genpage upload uses --page-id flag for updating",
-        "Upload command omits --add-to-sitemap (existing page update)",
-        "Browser verification is offered"
+        "Edit flow is detected from the user's prompt and handled inline by the orchestrator — planner agent is NOT invoked",
+        "Edit Step 1: Prerequisites are validated (node --version, pac help)",
+        "Edit Step 2: Authentication is confirmed and environment reported",
+        "Edit Step 2: pac model list-languages is NOT run (edit flow skips language detection)",
+        "Edit Step 3: User is asked for the app and page to edit",
+        "Edit Step 3: pac model genpage download --app-id <id> --page-id <id> --output-directory is run to download existing code",
+        "Edit Step 3: The downloaded code is read to understand the current implementation",
+        "Edit Step 3: User is asked what changes to make (search + sort confirmed)",
+        "Edit Step 4: A plan is presented describing the changes before modifying code",
+        "Edit Step 5: If Dataverse entities are used, RuntimeTypes.ts is generated and read to verify column names",
+        "Edit Step 6: genpage-rules-reference.md is read before modifying code",
+        "Edit Step 6: Updated code preserves existing functionality while adding search and sort",
+        "Edit Step 6: Search implementation uses Fluent UI V9 SearchBox or Input component",
+        "Edit Step 6: Sort implementation uses column header click handlers or Fluent UI sorting",
+        "Edit Step 7: pac model genpage upload uses --page-id flag for updating",
+        "Edit Step 7: Upload command omits --add-to-sitemap (existing page update)",
+        "Edit Step 8: Browser verification is offered"
       ]
     },
     {

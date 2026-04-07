@@ -51,17 +51,25 @@ Determine the **dependency order**:
 
 ## Step 2 — Check Dataverse Plugin Readiness
 
-Verify the Dataverse Skills plugin has been configured:
+Verify the Dataverse Skills plugin has been configured by checking for its
+authentication files in the **project root** (not the working directory):
 
 ```bash
-test -f .env && echo "EXISTS" || echo "MISSING"
+test -f "$PROJECT_ROOT/.env" && echo "EXISTS" || echo "MISSING"
 ```
 
 ```bash
-test -f scripts/auth.py && echo "EXISTS" || echo "MISSING"
+test -f "$PROJECT_ROOT/scripts/auth.py" && echo "EXISTS" || echo "MISSING"
 ```
 
-If either file is missing, inform the user:
+Where `$PROJECT_ROOT` is the root of the user's project (the parent of the working
+directory, or the current working directory when `/genpage` was invoked). Look for
+`.env` and `scripts/auth.py` by searching upward from the working directory.
+
+If either file is missing, try calling `list_tables` as a connectivity test. If
+`list_tables` succeeds, the Dataverse connection is working regardless of file layout.
+
+If `list_tables` also fails, inform the user:
 
 > "The Dataverse Skills plugin needs to be connected first. Please run `/dv-connect`
 > to set up authentication, then retry."

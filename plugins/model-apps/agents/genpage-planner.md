@@ -82,10 +82,19 @@ pac auth select --index <user-chosen-index>
 
 Report: "Working with environment: [name]" and proceed.
 
-### Detect Configured Languages (New Pages Only)
+## Step 3 — Gather Requirements
 
-When creating **new** pages, detect configured languages after confirming the
-active environment:
+Ask these questions one at a time via `AskUserQuestion`:
+
+1. **"Create new page(s) or edit an existing one?"**
+   - If edit: return immediately with `{ "action": "edit" }` — the orchestrator
+     handles edits inline, not through agents. **Do not run `list-languages` or
+     continue further.**
+   - If new: continue to next question.
+
+### Detect Configured Languages
+
+After confirming the user wants to create **new** pages, detect configured languages:
 
 ```powershell
 pac model list-languages
@@ -95,14 +104,7 @@ Note the output. If multiple languages are configured (or any non-English langua
 localization will be included in the generated code. Include the detected languages
 when reporting the environment to the user.
 
-## Step 3 — Gather Requirements
-
-Ask these questions one at a time via `AskUserQuestion`:
-
-1. **"Create new page(s) or edit an existing one?"**
-   - If edit: return immediately with `{ "action": "edit" }` — the orchestrator
-     handles edits inline, not through agents.
-   - If new: continue to next question.
+### Continue Requirements Gathering
 
 2. **"Describe what you'd like to build"** — present two example descriptions as
    options and let the user type their own via the "Other" option:
