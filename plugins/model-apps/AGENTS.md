@@ -6,7 +6,7 @@ This file provides guidance to AI Agents when working with the **model-apps** pl
 
 A plugin for building and deploying Power Apps generative pages (genux) for model-driven apps. Uses React 17 + TypeScript + Fluent UI V9 single-file components, deployed via PAC CLI.
 
-Single-session workflow — each `/genpage` invocation completes the full cycle: validate prerequisites, gather requirements, generate schema, produce code, and deploy.
+The `/genpage` skill orchestrates specialist agents: a planner (requirements + plan approval), an optional datamodel builder (Dataverse entity creation via the Dataverse Skills plugin), and parallel page builders (code generation). Entity creation requires the `microsoft/Dataverse-skills` plugin as a soft dependency.
 
 ## Local Development
 
@@ -23,6 +23,10 @@ claude --plugin-dir /path/to/plugins/model-apps
 .mcp.json                      ← MCP server config (Playwright for browser verification)
 AGENTS.md                      ← Plugin guidance for AI agents (this file)
 CLAUDE.md                      ← Symlink → AGENTS.md
+agents/                        ← Agent definitions (invoked by skills via Task tool)
+  genpage-planner.md           ← Requirements, discovery, plan doc, user approval
+  genpage-datamodel-builder.md ← DV entity creation via Dataverse plugin
+  genpage-page-builder.md      ← Writes one .tsx file; runs in parallel for multi-page
 references/                    ← Shared reference docs
   genpage-rules-reference.md   ← Full code-gen rules, DataAPI types, layout patterns, common errors
   troubleshooting.md           ← Common issues and fixes
@@ -31,14 +35,24 @@ scripts/
   launch-playwright-mcp.js     ← Playwright MCP server launcher (detects system browser)
 skills/
   genpage/
-    SKILL.md                   ← Skill definition with frontmatter (model, allowed-tools)
+    SKILL.md                   ← Orchestrator skill (delegates to agents)
 ```
 
 ## Skills
 
 | Skill | Description |
 |-------|-------------|
-| `/genpage` | Build and deploy a generative page for a model-driven Power App |
+| `/genpage` | Build and deploy generative pages for a model-driven Power App |
+
+## Agents
+
+Agents are invoked by skills via the `Task` tool — they are not user-invocable.
+
+| Agent | Invoked By | Description |
+|-------|-----------|-------------|
+| `genpage-planner` | `genpage` | Validates prereqs, gathers requirements, detects entity/app existence, presents plan for approval, writes `genpage-plan.md` |
+| `genpage-datamodel-builder` | `genpage` | Creates Dataverse tables, columns, relationships, choices, and sample data using the Dataverse Skills plugin (soft dependency) |
+| `genpage-page-builder` | `genpage` | Generates one complete `.tsx` page from the plan and schema; runs in parallel with other builders for multi-page requests |
 
 ## Key Concepts
 
