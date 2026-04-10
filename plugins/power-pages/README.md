@@ -19,13 +19,22 @@ Create and deploy Power Pages code sites using modern frontend frameworks. This 
 claude --plugin-dir /path/to/power-platform-skills/plugins/power-pages
 ```
 
+## Hook behavior
+
+The plugin centralizes Claude Code hook registration in `hooks/hooks.json`.
+
+- `PostToolUse` hooks match the `Skill` tool so validation runs when a tracked Power Pages skill completes.
+- Command validators and checklist verification are maintained centrally instead of in per-skill frontmatter.
+
+This keeps hook behavior in one place and avoids relying on skill-frontmatter hook registration.
+
 ## Prerequisites
 
 | Prerequisite | Required for | Install |
 |---|---|---|
 | [Node.js](https://nodejs.org/) (LTS) | All skills | `winget install OpenJS.NodeJS.LTS` |
-| [PAC CLI](https://learn.microsoft.com/en-us/power-platform/developer/cli/introduction) | Deploy, activate, data model | `dotnet tool install -g Microsoft.PowerApps.CLI.Tool` |
-| [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) | Data model, sample data, activation | `winget install Microsoft.AzureCLI` |
+| [PAC CLI](https://learn.microsoft.com/power-platform/developer/cli/introduction) | Deploy, activate, data model | `dotnet tool install -g Microsoft.PowerApps.CLI.Tool` |
+| [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) | Data model, sample data, activation | `winget install Microsoft.AzureCLI` |
 
 ## Skills
 
@@ -97,7 +106,7 @@ The skill first scans your codebase to find components using mock data, placehol
 - TypeScript entity types and domain mappers per table
 - CRUD service layer per table using `/_api/` endpoints with dual token headers and `@odata.bind` for lookups
 - Framework-specific patterns: React hooks, Vue composables, Angular injectable services
-- Table permission YAML files and site setting YAML files (with explicit column lists — never `*` wildcards)
+- Table permission YAML files and site setting YAML files (with explicit validated column lists by default; use `*` only for aggregate OData scenarios that otherwise 403)
 
 **What gets updated:**
 
@@ -197,10 +206,28 @@ claude --dangerously-skip-permissions
 
 ## Documentation
 
-- [Power Pages Code Sites](https://learn.microsoft.com/en-us/power-pages/configure/create-code-sites)
-- [PAC CLI Reference](https://learn.microsoft.com/en-us/power-platform/developer/cli/reference/pages)
-- [Power Pages REST API](https://learn.microsoft.com/en-us/rest/api/power-platform/powerpages/websites)
-- [Dataverse Web API](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/overview)
+- [Power Pages AI Plugin Documentation](https://learn.microsoft.com/power-pages/configure/create-code-site-using-claude-code)
+- [Power Pages Code Sites](https://learn.microsoft.com/power-pages/configure/create-code-sites)
+- [PAC CLI Reference](https://learn.microsoft.com/power-platform/developer/cli/reference/pages)
+- [Power Pages REST API](https://learn.microsoft.com/rest/api/power-platform/powerpages/websites)
+- [Dataverse Web API](https://learn.microsoft.com/power-apps/developer/data-platform/webapi/overview)
+
+## Testing validator scripts
+
+Run the validator unit tests with Node's built-in test runner:
+
+```powershell
+$files = Get-ChildItem .\plugins\power-pages\scripts\tests\*.test.js | ForEach-Object { $_.FullName }
+node --test $files
+```
+
+To validate table-permission relationship names against live Dataverse metadata during local testing, run:
+
+```powershell
+node .\plugins\power-pages\scripts\validate-permissions-schema.js --projectRoot C:\path\to\site --validate-dataverse-relationships --envUrl https://your-org.crm.dynamics.com
+```
+
+This Dataverse relationship check is intended for local validation only and should not be used in CI.
 
 ## License
 
