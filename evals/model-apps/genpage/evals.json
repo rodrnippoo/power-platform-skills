@@ -20,7 +20,7 @@
         "Phase 1 (Planner): Question 2 (describe the page) is skipped because the user provided a description with the command",
         "Phase 1 (Planner): Question 3 (Dataverse or mock data) is skipped because the description specifies Account table",
         "Phase 1 (Planner): Question 4 (specific requirements) is asked via AskUserQuestion",
-        "Phase 1 (Planner): Entity detection checks if list_tables MCP tool is available",
+        "Phase 1 (Planner): Entity detection runs pac model list-tables --search to check entity existence",
         "Phase 1 (Planner): pac model list is run to check available apps",
         "Phase 1 (Planner): User is asked which app to use (if multiple) or to confirm (if one)",
         "Phase 1 (Planner): A plan is presented via plan mode listing data source (Account entity), features, Fluent UI components, and layout approach",
@@ -196,14 +196,14 @@
     {
       "id": 7,
       "prompt": "Build a page showing all job candidates with their application status, interview scores, and assigned recruiter. I need new tables for this — cr_candidate and cr_jobrequisition entities don't exist yet in my environment.",
-      "expected_output": "The orchestrator creates a working directory, invokes genpage-planner which validates prerequisites, authenticates, gathers requirements, uses list_tables (Dataverse MCP) to detect that cr_candidate and cr_jobrequisition entities do NOT exist, checks available apps, presents a plan showing entities to create (with columns, relationships, choices), and writes genpage-plan.md. The orchestrator invokes genpage-datamodel-builder which reads the plan, creates tables/columns/relationships in dependency order, asks about sample data, and returns. The orchestrator generates RuntimeTypes.ts, invokes genpage-page-builder to generate the .tsx, and deploys.",
+      "expected_output": "The orchestrator creates a working directory, invokes genpage-planner which validates prerequisites, authenticates, gathers requirements, runs pac model list-tables --search to detect that cr_candidate and cr_jobrequisition entities do NOT exist, checks available apps, presents a plan showing entities to create (with columns, relationships, choices), and writes genpage-plan.md. The orchestrator invokes genpage-datamodel-builder which reads the plan, creates tables/columns/relationships in dependency order, asks about sample data, and returns. The orchestrator generates RuntimeTypes.ts, invokes genpage-page-builder to generate the .tsx, and deploys.",
       "files": [],
       "expectations": [
         "A workflow-log.md file is saved documenting all phases attempted",
         "Phase 0: Working directory created",
         "Phase 1 (Planner): Prerequisites validated",
         "Phase 1 (Planner): Authentication confirmed",
-        "Phase 1 (Planner): list_tables MCP tool is called to check entity existence",
+        "Phase 1 (Planner): pac model list-tables --search is run to check entity existence",
         "Phase 1 (Planner): cr_candidate and cr_jobrequisition are identified as NOT existing",
         "Phase 1 (Planner): pac model list is run to check available apps",
         "Phase 1 (Planner): Plan includes entities to create with column definitions, types, and relationships",
@@ -246,11 +246,11 @@
     {
       "id": 9,
       "prompt": "Build a project tracker page. I need new cr_project and cr_milestone entities with sample data to test the page.",
-      "expected_output": "The orchestrator invokes genpage-planner which detects cr_project and cr_milestone don't exist via list_tables, presents a plan with entity specifications. The orchestrator invokes genpage-datamodel-builder which creates the entities, asks about sample data (user says yes since they explicitly requested it), and inserts realistic sample records. The orchestrator generates RuntimeTypes, invokes page-builder, and deploys.",
+      "expected_output": "The orchestrator invokes genpage-planner which detects cr_project and cr_milestone don't exist via pac model list-tables --search, presents a plan with entity specifications. The orchestrator invokes genpage-datamodel-builder which creates the entities, asks about sample data (user says yes since they explicitly requested it), and inserts realistic sample records. The orchestrator generates RuntimeTypes, invokes page-builder, and deploys.",
       "files": [],
       "expectations": [
         "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 1 (Planner): list_tables confirms cr_project and cr_milestone do NOT exist",
+        "Phase 1 (Planner): pac model list-tables --search confirms cr_project and cr_milestone do NOT exist",
         "Phase 1 (Planner): Plan includes entity definitions for cr_project and cr_milestone",
         "Phase 1 (Planner): Plan includes a relationship (cr_milestone has lookup to cr_project)",
         "Phase 2 (Datamodel Builder): cr_project is created first (independent table)",
@@ -267,17 +267,17 @@
     {
       "id": 10,
       "prompt": "Build a page for my new cr_widget entity that doesn't exist yet.",
-      "expected_output": "The orchestrator invokes genpage-planner which checks for list_tables MCP tool availability. The tool is NOT available (Dataverse Skills plugin is not installed). The planner informs the user that entity creation requires the Dataverse Skills plugin and provides installation instructions. The planner asks the user to install the plugin or specify existing tables to continue. The flow does NOT proceed with entity creation.",
+      "expected_output": "The orchestrator invokes genpage-planner which runs pac model list-tables --search to check if cr_widget exists. It does not. The planner informs the user that entity creation requires the Dataverse Skills plugin and provides installation instructions. The planner asks the user to install the plugin or specify existing tables to continue. If the plugin is not installed, the flow does NOT proceed with entity creation.",
       "files": [],
       "expectations": [
         "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 1 (Planner): Planner checks if list_tables MCP tool is available",
-        "Phase 1 (Planner): list_tables is NOT available (Dataverse Skills plugin not installed)",
+        "Phase 1 (Planner): pac model list-tables --search 'cr_widget' is run",
+        "Phase 1 (Planner): cr_widget is identified as NOT existing",
         "Phase 1 (Planner): User is informed that entity creation requires the Dataverse Skills plugin",
         "Phase 1 (Planner): Installation instructions reference microsoft/Dataverse-skills",
         "Phase 1 (Planner): User is given the option to install the plugin or use existing tables",
-        "Phase 1 (Planner): Entity creation does NOT proceed without the Dataverse plugin",
-        "Phase 2: Datamodel builder is NOT invoked"
+        "Phase 1 (Planner): If Dataverse plugin is not installed, entity creation does NOT proceed",
+        "Phase 2: Datamodel builder is NOT invoked when Dataverse plugin is unavailable"
       ]
     },
     {

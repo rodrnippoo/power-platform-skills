@@ -17,7 +17,6 @@ tools:
   - TaskUpdate
   - TaskList
   - AskUserQuestion
-  - mcp__dataverse__list_tables
 ---
 
 # Genpage Planner
@@ -129,20 +128,26 @@ when reporting the environment to the user.
 
 ### Entity Detection
 
-Check if the Dataverse MCP `list_tables` tool is available:
+Use `pac model list-tables` to check which entities exist in the environment.
+Pass the user's requested entity logical names via `--search` (comma-separated):
 
-**If available:** Call `list_tables` to get the list of tables in the environment.
-Compare the user's requested entities against the results:
+```powershell
+pac model list-tables --search "entity1,entity2"
+```
+
+Compare the returned tables against the user's requested entities:
 - Entities found → mark as **"exists"**
 - Entities not found → mark as **"needs creation"**
 
-**If NOT available and user needs new entities:** Inform the user:
+If any entities need creating, inform the user that entity creation requires
+the Dataverse Skills plugin:
 
-> "Entity creation requires the Dataverse Skills plugin. Install it from
-> `microsoft/Dataverse-skills`, or specify existing tables to continue."
+> "Some entities do not exist and need to be created. Entity creation requires
+> the Dataverse Skills plugin (`microsoft/Dataverse-skills`). If it's not
+> installed, install it or specify existing tables to continue."
 
-Proceed only with existing entities. Do NOT attempt entity creation without
-the Dataverse plugin.
+Only entity **creation** requires the Dataverse plugin — detection uses
+`pac model list-tables` natively.
 
 ### App Detection
 
