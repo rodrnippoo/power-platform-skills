@@ -366,18 +366,10 @@ pac model genpage download `
   --output-directory <working-dir>
 ```
 
-The download produces this structure:
-
-```
-<working-dir>/<page-id>/
-├── page.tsx        ← Source code
-├── page.js         ← Transpiled JS (ignore)
-├── config.json     ← { "dataSources": [...], "model": "..." }
-└── prompt.txt      ← Original --prompt used when the page was created
-```
-
-Note the exact page-id folder path — downstream steps operate on
-`<working-dir>/<page-id>/page.tsx`.
+The download creates a `<working-dir>/<page-id>/` folder with fixed filenames:
+`page.tsx` (source), `config.json` (entity list + model), `prompt.txt` (original
+prompt). Downstream phases operate on `<working-dir>/<page-id>/page.tsx` for
+editing and uploading, and read `config.json.dataSources` in Phase 3.
 
 ### Edit Phase 3: Generate RuntimeTypes (Conditional)
 
