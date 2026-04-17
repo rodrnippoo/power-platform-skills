@@ -666,6 +666,19 @@ function get() {
 - The server logic can add additional validation, transformation, or logging around the custom action call — it doesn't have to be a pass-through
 - When Custom API response properties are known (from Phase 2.1.2), map them to the response object for clarity
 
+#### Dataverse Response Shape (Critical for Frontend Integration)
+
+When a function returns the result of a `Server.Connector.Dataverse.*` method directly, the client receives a **double-wrapped** payload: the server logic envelope's `data` is a JSON string that parses to `{ Body: "<JSON string>", StatusCode, Headers }`, and `Body` must be parsed again to reach the actual Dataverse records. `CreateRecord` returns the new record GUID only through the `entityid` HTTP response header — it is not in the body. This is the most common cause of broken frontend integrations.
+
+Reference: <https://learn.microsoft.com/en-us/power-pages/configure/server-logic-operations>
+
+For each Dataverse-backed function, decide between:
+
+1. **Raw passthrough** — Return the Dataverse connector result directly. Matches the Microsoft Learn CRUD sample. The client must double-parse (`JSON.parse(envelope.data)` → `JSON.parse(outer.Body)`). Use this only for generic CRUD endpoints driven by `entitySetName` query parameters.
+2. **Server-shaped response (recommended)** — Parse `dvResponse.Body` inside the server logic, project the fields the UI actually needs, and return a feature-specific shape via `JSON.stringify({ status, ... })`. The client then parses `envelope.data` once and gets a stable shape. Use this for any endpoint that backs a specific feature.
+
+Record the chosen approach for each server logic item so Phase 9 can wire the frontend against the correct shape. The full shape details, examples, and both client-side parsing patterns are in `${CLAUDE_PLUGIN_ROOT}/skills/add-server-logic/references/frontend-integration-reference.md` under "Dataverse Connector Response Format".
+
 #### Referencing Secrets in Code
 
 When the server logic needs a secret value identified in Phase 2.3, **never hardcode the value**. Instead, read it at runtime from a site setting backed by an environment variable:
@@ -1047,6 +1060,8 @@ Following the reference:
 - Replace placeholder data, mock handlers, or temporary actions when they are meant to be backed by the new server logic endpoints
 - Add or preserve loading, success, empty, and error states so the UI behaves like a finished feature
 - **For validate-and-execute endpoints**: The frontend must call the server logic endpoint for the protected operation (e.g., status transition) — it must NOT make a separate Web API PATCH for the same field. Ensure the UI for that operation (e.g., a "Submit" or "Approve" button) calls the server logic service function, not the Web API service
+- **For Dataverse-backed endpoints**: Match the frontend parsing to the approach chosen in Phase 5.3. If the server logic returns the raw `Server.Connector.Dataverse.*` result, the client must double-parse — `JSON.parse(envelope.data)` to get the outer object, then `JSON.parse(outer.Body)` to reach the records (use `.value` for `RetrieveMultipleRecords`). For `CreateRecord` the new id is in the `entityid` response header, not the body. If the server logic already unwrapped `Body` and returned a feature-specific shape, the client only needs `JSON.parse(envelope.data)` once. See "Dataverse Connector Response Format" in the frontend integration reference.
+- **If the response shape is unclear**: Do not guess. After the site is deployed, invoke `/test-site` against the live site so the actual server logic response can be captured from the network tab and used to drive the integration
 
 ### 9.4 Git Commit
 
