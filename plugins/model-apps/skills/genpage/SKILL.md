@@ -17,17 +17,25 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, Task, AskUserQuest
 
 ## Overview
 
-This skill orchestrates three specialist agents:
+This skill orchestrates five specialist agents across the create and edit flows:
 
+**Create flow:**
 1. **`genpage-planner`** — validates prerequisites, gathers requirements, detects what
    entities and apps exist, presents a plan for approval, writes `genpage-plan.md`
-2. **`genpage-datamodel-builder`** — creates Dataverse entities (tables, columns,
+2. **`genpage-entity-builder`** — creates Dataverse entities (tables, columns,
    relationships, choices, sample data) using the Dataverse Skills plugin
 3. **`genpage-page-builder`** — generates one complete `.tsx` file per page; multiple
    builders run in parallel for multi-page requests
 
+**Edit flow (for complex edits only; simple edits stay inline):**
+
+4. **`genpage-edit-planner`** — analyzes an existing page, gathers change requirements,
+   presents an edit plan, writes `genpage-edit-plan.md`
+5. **`genpage-page-editor`** — applies planned edits to the existing `.tsx` in place
+   while preserving existing functionality
+
 You (the skill) coordinate the agents and own app creation, RuntimeTypes generation,
-deployment, browser verification, and the edit flow.
+deployment, browser verification, and simple inline edits.
 
 ## References
 
@@ -63,12 +71,13 @@ Derive a short folder name from the user's requirements:
 
 ### Phase 1: Plan
 
-**Edit detection:** If the user's prompt clearly describes editing an existing page
-(e.g., "edit", "update", "modify", "change" an existing page), skip Phase 1 entirely
-and go directly to the **Edit Flow** section below. Only invoke the planner for new
-page creation.
+Invoke the `genpage-planner` agent using the `Task` tool. The planner asks the user
+whether they want to create new pages or edit an existing one — **do NOT pre-infer
+the intent from the prompt**. The planner is the single source of truth for new/edit
+disambiguation.
 
-Invoke the `genpage-planner` agent using the `Task` tool.
+If the planner returns `{ "action": "edit" }`, skip Phases 2-8 and go directly to
+the **Edit Flow** section below.
 
 Pass a prompt that includes:
 
@@ -100,12 +109,35 @@ page. Skip to the **Edit Flow** section below.
 Read `genpage-plan.md` from the working directory. Check the **Entity Creation Required**
 section.
 
-**If entities need creating:**
-- Invoke the `genpage-datamodel-builder` agent via the `Task` tool
-- Pass: path to `genpage-plan.md`, working directory
-- Wait for completion
+**If the section literally says "No entity creation required — all entities already exist":**
+Skip to Phase 3.
 
-**If no entities need creating:** Skip to Phase 3.
+**If entities need creating:**
+
+#### 2a. Probe Dataverse plugin availability
+
+Before invoking the entity-builder, verify the Dataverse Skills plugin is both
+**installed** AND **connected**. Try calling the Dataverse MCP `list_tables` tool:
+
+- **If the tool is not available** (not installed): Tell the user exactly this:
+  > "Entity creation requires the Dataverse Skills plugin. Install it from
+  > `microsoft/Dataverse-skills`, then retry."
+  Stop the workflow — do NOT invoke the entity-builder.
+
+- **If the tool is available but call fails with auth/connection error** (installed but not connected):
+  > "The Dataverse Skills plugin is installed but not connected to this environment.
+  > Run `/dv-connect` to configure authentication, then retry."
+  Stop the workflow — do NOT invoke the entity-builder.
+
+- **If the call succeeds:** The plugin is installed and connected. Proceed to 2b.
+
+#### 2b. Invoke entity-builder
+
+Invoke the `genpage-entity-builder` agent via the `Task` tool. Pass:
+- Path to `genpage-plan.md`
+- Working directory
+
+Wait for completion.
 
 ### Phase 3: App Creation/Selection
 
@@ -135,26 +167,53 @@ After generating, read the RuntimeTypes.ts file to verify it generated correctly
 
 ### Phase 5: Build Pages (Parallel)
 
-Read `genpage-plan.md` and extract the pages table. For each page, invoke a
-`genpage-page-builder` agent via the `Task` tool. **Fire all invocations in a single
-message** for parallel execution.
+Read `genpage-plan.md` and extract the pages table.
+
+#### 5a. Validate the plan before dispatch
+
+Before invoking any builders, verify:
+- At least one page exists in the `## Pages` table
+- Every page has a `### [Page Name]` subsection in `## Per-Page Specifications`
+- **All filenames in the `## Pages` table are unique.** If any are duplicated,
+  rewrite the plan appending `-1`, `-2`, etc. before dispatch. Duplicate filenames
+  cause silent last-writer-wins data loss under parallel execution.
+
+See `${CLAUDE_PLUGIN_ROOT}/references/genpage-plan-schema.md` for the full contract.
+
+#### 5b. Invoke page-builders in parallel
+
+For each page, invoke a `genpage-page-builder` agent via the `Task` tool. **Fire all
+invocations in a single message** for parallel execution.
 
 For each page, pass a prompt that includes:
 
 - Page name (e.g., "Candidate Tracker")
 - Target file name (e.g., "candidate-tracker.tsx")
 - Absolute path to `genpage-plan.md`
-- Absolute path to `RuntimeTypes.ts` (if Dataverse entities; omit for mock data)
+- Data mode (see below) — either a RuntimeTypes path or an explicit mock flag
 - Working directory
 - Plugin root: `${CLAUDE_PLUGIN_ROOT}`
 
-Example prompt per page:
+**For Dataverse pages**, include the RuntimeTypes line:
 
 > You are the genpage-page-builder agent. Generate the **[Page Name]** page.
 >
 > - Target file: [filename].tsx
 > - Plan document: [absolute path to genpage-plan.md]
-> - RuntimeTypes: [absolute path to RuntimeTypes.ts] (or "mock data — no RuntimeTypes")
+> - Data mode: **dataverse**
+> - RuntimeTypes: [absolute path to RuntimeTypes.ts]
+> - Working directory: [absolute path from Phase 0]
+> - Plugin root: ${CLAUDE_PLUGIN_ROOT}
+>
+> Follow the instructions in your agent file. Write [filename].tsx and return your
+
+**For mock data pages**, omit the RuntimeTypes line and set `Data mode: mock`:
+
+> You are the genpage-page-builder agent. Generate the **[Page Name]** page.
+>
+> - Target file: [filename].tsx
+> - Plan document: [absolute path to genpage-plan.md]
+> - Data mode: **mock**
 > - Working directory: [absolute path from Phase 0]
 > - Plugin root: ${CLAUDE_PLUGIN_ROOT}
 >
@@ -267,7 +326,11 @@ If issues are found: fix the code, re-deploy (Phase 6), repeat verification.
 
 ### Phase 8: Summary
 
-Present a final summary:
+Write a `workflow-log.md` file to the working directory summarizing the run:
+agents invoked, commands executed, decisions made, files produced. This log is
+useful for debugging and required by the eval harness.
+
+Then present a final summary to the user:
 
 ```
 ## Genpage Complete
@@ -285,76 +348,137 @@ Next steps: Share with team, iterate on design, create additional pages
 
 ## Edit Flow
 
-The edit workflow stays inline in the orchestrator — it does not route through the
-planner/builder agents. This is triggered when the user asks to edit an existing page
-(detected in Phase 1 when the planner returns `{ "action": "edit" }`), or when the
-user's prompt clearly describes editing an existing page.
+Triggered when the `genpage-planner` returns `{ "action": "edit" }` in Phase 1.
+The edit flow has a **simple/complex split** — simple edits are handled inline;
+complex edits are orchestrated through `genpage-edit-planner` and `genpage-page-editor`.
 
-### Edit Step 1: Validate Prerequisites
+### Edit Phase 1: Gather Edit Target
 
-Run these checks (first invocation per session only). Run each command separately:
+The planner has already:
+- Validated prereqs
+- Confirmed auth and environment
 
-```powershell
-node --version
-```
+Ask the user (via `AskUserQuestion`) for the app-id and page-id of the page to edit.
+Accept either the app-id GUID or the app name (resolve via `pac model list`).
 
-```powershell
-pac help
-```
-
-Verify PAC CLI version >= 2.3.1. See [troubleshooting.md](../../references/troubleshooting.md) if issues arise.
-
-### Edit Step 2: Authenticate and Select Environment
+### Edit Phase 2: Download Existing Page
 
 ```powershell
-pac auth list
+pac model genpage download `
+  --app-id <app-id> `
+  --page-id <page-id> `
+  --output-directory <working-dir>
 ```
 
-Follow the same auth flow as described in the planner agent (select profile, confirm environment).
+The downloaded file appears as `<working-dir>/<page-name>.tsx`. Note the exact path.
 
-### Edit Step 3: Download and Understand Existing Page
+### Edit Phase 3: Generate RuntimeTypes (Conditional)
 
-Ask the user for the app-id and page-id, then download:
+Read the downloaded `.tsx` file. If it imports from `./RuntimeTypes` AND references
+any Dataverse entities via `dataApi`, generate the schema for those entities:
 
 ```powershell
-pac model genpage download --app-id <app-id> --page-id <page-id> --output-directory ./output-dir
+pac model genpage generate-types `
+  --data-sources "entity1,entity2" `
+  --output-file <working-dir>/RuntimeTypes.ts
 ```
 
-Read the downloaded code to understand the current implementation. Ask the user what changes to make.
+If the page is mock-data only (no `dataApi` calls), skip this phase.
 
-### Edit Step 4: Plan Changes
+### Edit Phase 4: Assess Complexity
 
-Present a plan describing the proposed changes before modifying code. Wait for confirmation.
+Read the downloaded `.tsx` and the user's edit intent (`$ARGUMENTS`). Classify:
 
-### Edit Step 5: Generate Schema (If Needed)
+**Simple** — all of the following are true:
+- Changes affect ≤ 2 properties, literals, or small styling adjustments
+- No new components, no new state, no new data sources
+- No restructural layout changes
 
-If the page uses Dataverse entities:
+Examples: change a button color, update a label, fix a formula, adjust a padding value.
 
-```powershell
-pac model genpage generate-types --data-sources "entity1,entity2" --output-file RuntimeTypes.ts
-```
+**Complex** — any of the following are true:
+- New features (search, filter, sort, new sub-components)
+- New data sources or columns referenced
+- Restructural layout changes
+- Visual redesign
 
-Read RuntimeTypes.ts to verify column names.
+Examples: add a search bar and column sorting, redesign the page layout, add a new
+data grid alongside existing content.
 
-### Edit Step 6: Read Rules and Modify Code
+- If **simple** → proceed to Edit Phase 5a.
+- If **complex** → proceed to Edit Phase 5b.
 
-Read [genpage-rules-reference.md](../../references/genpage-rules-reference.md) before modifying code. Apply the requested changes while preserving existing functionality. Follow all development standards.
+### Edit Phase 5a: Simple — Direct Edit
 
-### Edit Step 7: Deploy Updated Page
+For simple edits, handle inline without dispatching agents:
+
+1. Read `${CLAUDE_PLUGIN_ROOT}/references/genpage-rules-reference.md` before editing.
+2. Briefly describe the proposed change to the user, get confirmation.
+3. Apply the change using the `Edit` tool on the downloaded `.tsx`.
+4. Proceed to Edit Phase 6 (deploy).
+
+### Edit Phase 5b: Complex — Plan and Edit via Agents
+
+For complex edits, orchestrate through specialist agents:
+
+#### 5b.1 — Invoke edit-planner
+
+Invoke the `genpage-edit-planner` agent via the `Task` tool. Pass:
+
+- The user's edit intent: `$ARGUMENTS`
+- The working directory (absolute path)
+- The plugin root: `${CLAUDE_PLUGIN_ROOT}`
+- The app-id and page-id
+- The downloaded file path: `<working-dir>/<page-name>.tsx`
+
+The planner writes `genpage-edit-plan.md` and returns a summary. Wait for it to finish.
+
+#### 5b.2 — Invoke page-editor
+
+Invoke the `genpage-page-editor` agent via the `Task` tool. Pass:
+
+- Target file path: `<working-dir>/<page-name>.tsx`
+- Edit plan path: `<working-dir>/genpage-edit-plan.md`
+- RuntimeTypes path: `<working-dir>/RuntimeTypes.ts` (if generated in Edit Phase 3)
+- Working directory (absolute path)
+- Plugin root: `${CLAUDE_PLUGIN_ROOT}`
+
+The page-editor applies the changes in place and returns a summary. Wait for it to finish.
+
+### Edit Phase 6: Deploy Updated Page
 
 ```powershell
 pac model genpage upload `
   --app-id <app-id> `
   --page-id <page-id> `
-  --code-file page-name.tsx `
+  --code-file <working-dir>/<page-name>.tsx `
   --data-sources "entity1,entity2" `
-  --prompt "User's original request summary" `
+  --prompt "User's edit request summary" `
   --model "<current-model-id>" `
   --agent-message "Description of what was changed"
 ```
 
-Note: Use `--page-id` for updates. Omit `--add-to-sitemap`.
+Use `--page-id` for updates. Omit `--add-to-sitemap` (the page is already in the sitemap).
+Omit `--data-sources` for mock-data pages.
 
-### Edit Step 8: Verify and Summarize
+### Edit Phase 7: Verify (Optional)
 
-Offer browser verification (same as Phase 7 above), then provide a summary of changes made.
+Offer browser verification via `AskUserQuestion` (same flow as Phase 7 in the create flow).
+
+### Edit Phase 8: Summary
+
+Write a `workflow-log.md` file to the working directory (same purpose as Phase 8 in
+the create flow).
+
+Then present a summary to the user:
+
+```
+## Edit Complete
+
+| File | Complexity | Changes | Status |
+|------|------------|---------|--------|
+| [filename].tsx | Simple / Complex | [N changes] | Deployed |
+
+App: [app name] ([app-id])
+Page ID: [page-id]
+```

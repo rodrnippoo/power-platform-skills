@@ -47,9 +47,9 @@ node --version
 pac help
 ```
 
-`pac help` output includes the version number. Verify the version is **>= 2.3.1**.
-If the version is older, instruct the user to update:
-`dotnet tool update --global Microsoft.PowerApps.CLI.Tool`.
+`pac help` output includes the version number. Verify the version is **>= 2.7.0**
+(required for `pac model create` support). If the version is older, instruct the
+user to update: `dotnet tool update --global Microsoft.PowerApps.CLI.Tool`.
 
 If either command fails, inform the user and provide installation instructions.
 Do NOT proceed until prerequisites are met.
@@ -135,9 +135,17 @@ Pass the user's requested entity logical names via `--search` (comma-separated):
 pac model list-tables --search "entity1,entity2"
 ```
 
-Compare the returned tables against the user's requested entities:
-- Entities found → mark as **"exists"**
-- Entities not found → mark as **"needs creation"**
+**Important:** `--search` matches **substrings** across logical name, schema name,
+and display name — so `--search "account"` also returns `accountleads`,
+`accountlevelmonitoring`, etc. You **must** post-process the results and compare
+the `Logical Name` column against your requested entities using **exact equality**:
+
+- For each requested entity, look for a row where `Logical Name == <entity>`.
+- If found → mark as **"exists"**.
+- If not found → mark as **"needs creation"**.
+
+Do NOT trust the raw output as "exists" just because the search returned a match —
+the search is fuzzy, your check must be exact.
 
 If any entities need creating, inform the user that entity creation requires
 the Dataverse Skills plugin:
@@ -206,80 +214,15 @@ Mark the "Design page plan" task complete after approval.
 Write `genpage-plan.md` to the working directory. This document is the **single source
 of truth** for all downstream agents. It must be fully self-contained.
 
-Use this structure:
+**Follow the schema exactly** — section headings are a machine-readable contract that
+downstream agents parse by name. See:
 
-```markdown
-# Genpage Plan
-
-## User Requirements
-[The original user requirements passed to this agent]
-
-## Working Directory
-[Absolute path where files should be written]
-
-## Plugin Root
-[The plugin root path for reading references and samples]
-
-## Environment
-- URL: [environment URL]
-- App: [app name] ([app-id]) OR "create new: [name]"
-- Languages: [detected languages with LCIDs, or "English (1033) only"]
-
-## Pages
-| Page | File | Purpose | Entities |
-|------|------|---------|----------|
-| [Name] | [name].tsx | [description] | [entities or "mock data"] |
-
-## Entity Creation Required
-[If entities need creating, specify for each:]
-
-### [Entity logical name]
-- Display Name: [display name]
-- Columns:
-  | Logical Name | Type | Required | Notes |
-  |-------------|------|----------|-------|
-  | [name] | string/int/decimal/datetime/bool/choice | yes/no | [notes] |
-- Choice Columns:
-  | Column | Options |
-  |--------|---------|
-  | [name] | value1 (100000000), value2 (100000001), ... |
-- Relationships:
-  | Type | Related Entity | Lookup Field | Cascade |
-  |------|---------------|-------------|---------|
-  | 1:N lookup | [entity] | [field] | [cascade config] |
-
-[If no entities need creating:]
-No entity creation required — all entities already exist.
-
-## Existing Entities
-[List of entity logical names that already exist and will be used for RuntimeTypes generation]
-
-## Design Preferences
-- Styling: [user's styling preferences]
-- Features: [search, filtering, sorting, etc.]
-- Accessibility: [any specific requirements]
-
-## Relevant Samples
-[Which sample files from ${CLAUDE_PLUGIN_ROOT}/samples/ are most relevant to each page]
-| Page | Sample | Reason |
-|------|--------|--------|
-| [Name] | [N-sample-name.tsx] | [why this sample is relevant] |
-
-## Per-Page Specifications
-
-### [Page Name]
-- **File:** [name].tsx
-- **Purpose:** [description]
-- **Entities:** [list or "mock data"]
-- **Key Features:** [what this specific page should do]
-- **Components:** [Fluent UI V9 components to use]
-- **Layout:** [responsive design approach]
-- **Data Binding:** [how data flows — queryTable, retrieveRow, mock arrays]
-- **Interactions:** [click handlers, drag-drop, navigation, etc.]
-
-### [Page Name]
-[repeat for each page]
 ```
+${CLAUDE_PLUGIN_ROOT}/references/genpage-plan-schema.md
+```
+
+Read that file before writing the plan. Every required section must be present with
+the exact heading. Page filenames in the `## Pages` table must be unique.
 
 Mark the "Write plan document" task complete when done.
 
@@ -303,7 +246,7 @@ Plan document: [working directory]/genpage-plan.md
 ## Critical Constraints
 
 - **Do NOT generate code.** Code generation is handled by `genpage-page-builder`.
-- **Do NOT create entities.** Entity creation is handled by `genpage-datamodel-builder`.
+- **Do NOT create entities.** Entity creation is handled by `genpage-entity-builder`.
 - **Do NOT deploy.** Deployment is handled by the orchestrating skill.
 - **Do NOT generate RuntimeTypes.** The orchestrating skill handles this.
 - **One user interaction point:** The plan mode approval in Step 5 (plus requirements

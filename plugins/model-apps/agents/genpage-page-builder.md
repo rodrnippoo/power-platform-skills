@@ -24,25 +24,34 @@ You will be invoked with a prompt that includes:
 - **Page name** — e.g., "Candidate Tracker"
 - **Target file** — e.g., "candidate-tracker.tsx"
 - **Plan document path** — absolute path to `genpage-plan.md`
-- **RuntimeTypes path** — absolute path to `RuntimeTypes.ts` (omitted for mock data pages)
+- **Data mode** — either `dataverse` or `mock`
+- **RuntimeTypes path** — absolute path to `RuntimeTypes.ts` (present only when Data mode is `dataverse`)
 - **Working directory** — where to write the `.tsx` file
 - **Plugin root** — `${CLAUDE_PLUGIN_ROOT}` for reading references and samples
+
+The **Data mode** flag is authoritative — use it to decide whether to perform Step 2
+(read RuntimeTypes.ts) or skip it. Do not infer data mode from the plan document.
 
 ## Step 1 — Read the Plan Document
 
 Read `genpage-plan.md` at the path provided in your invocation prompt.
 
+The plan document follows a strict schema. See
+`${CLAUDE_PLUGIN_ROOT}/references/genpage-plan-schema.md` for the full contract.
+
 Locate and extract:
 
-- The **Per-Page Specification** for your assigned page (purpose, entities, features,
-  components, layout, data binding, interactions)
+- The **Per-Page Specification** subsection for your assigned page (purpose, entities,
+  features, components, layout, data binding, interactions)
 - The **Design Preferences** section (styling, features, accessibility notes)
 - The **Environment** section (languages for localization)
 - The **Relevant Samples** table (which sample to read for your page)
 
-## Step 2 — Read RuntimeTypes.ts (Dataverse Pages Only)
+## Step 2 — Read RuntimeTypes.ts (Data mode: dataverse only)
 
-If your page uses Dataverse entities, read `RuntimeTypes.ts` at the provided path.
+If **Data mode** is `mock`, skip this step.
+
+If **Data mode** is `dataverse`, read `RuntimeTypes.ts` at the provided path.
 
 Extract:
 - The actual column names available on each entity

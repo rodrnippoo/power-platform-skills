@@ -6,7 +6,7 @@ This file provides guidance to AI Agents when working with the **model-apps** pl
 
 A plugin for building and deploying Power Apps generative pages (genux) for model-driven apps. Uses React 17 + TypeScript + Fluent UI V9 single-file components, deployed via PAC CLI.
 
-The `/genpage` skill orchestrates specialist agents: a planner (requirements + plan approval), an optional datamodel builder (Dataverse entity creation via the Dataverse Skills plugin), and parallel page builders (code generation). Entity creation requires the `microsoft/Dataverse-skills` plugin as a soft dependency.
+The `/genpage` skill orchestrates specialist agents: a planner (requirements + plan approval), an optional entity builder (Dataverse entity creation via the Dataverse Skills plugin), and parallel page builders (code generation). Entity creation requires the `microsoft/Dataverse-skills` plugin as a soft dependency.
 
 ## Local Development
 
@@ -24,11 +24,14 @@ claude --plugin-dir /path/to/plugins/model-apps
 AGENTS.md                      ← Plugin guidance for AI agents (this file)
 CLAUDE.md                      ← Symlink → AGENTS.md
 agents/                        ← Agent definitions (invoked by skills via Task tool)
-  genpage-planner.md           ← Requirements, discovery, plan doc, user approval
-  genpage-datamodel-builder.md ← DV entity creation via Dataverse plugin
-  genpage-page-builder.md      ← Writes one .tsx file; runs in parallel for multi-page
+  genpage-planner.md           ← Requirements, discovery, plan doc, user approval (create flow)
+  genpage-entity-builder.md    ← DV entity creation via Dataverse plugin (create flow)
+  genpage-page-builder.md      ← Writes one .tsx file; runs in parallel for multi-page (create flow)
+  genpage-edit-planner.md      ← Analyzes existing page, plans complex edits (edit flow)
+  genpage-page-editor.md       ← Applies planned edits to existing .tsx in place (edit flow)
 references/                    ← Shared reference docs
   genpage-rules-reference.md   ← Full code-gen rules, DataAPI types, layout patterns, common errors
+  genpage-plan-schema.md       ← Schema contract for genpage-plan.md
   troubleshooting.md           ← Common issues and fixes
 samples/                       ← Example .tsx files (8 samples)
 scripts/
@@ -50,9 +53,11 @@ Agents are invoked by skills via the `Task` tool — they are not user-invocable
 
 | Agent | Invoked By | Description |
 |-------|-----------|-------------|
-| `genpage-planner` | `genpage` | Validates prereqs, gathers requirements, detects entity/app existence, presents plan for approval, writes `genpage-plan.md` |
-| `genpage-datamodel-builder` | `genpage` | Creates Dataverse tables, columns, relationships, choices, and sample data using the Dataverse Skills plugin (soft dependency) |
-| `genpage-page-builder` | `genpage` | Generates one complete `.tsx` page from the plan and schema; runs in parallel with other builders for multi-page requests |
+| `genpage-planner` | `genpage` (create flow) | Validates prereqs, gathers requirements, detects entity/app existence, presents plan for approval, writes `genpage-plan.md` |
+| `genpage-entity-builder` | `genpage` (create flow) | Creates Dataverse tables, columns, relationships, choices, and sample data using the Dataverse Skills plugin (soft dependency) |
+| `genpage-page-builder` | `genpage` (create flow) | Generates one complete `.tsx` page from the plan and schema; runs in parallel with other builders for multi-page requests |
+| `genpage-edit-planner` | `genpage` (edit flow, complex) | Analyzes an existing page, gathers change requirements, presents edit plan, writes `genpage-edit-plan.md` |
+| `genpage-page-editor` | `genpage` (edit flow, complex) | Applies planned edits to the existing `.tsx` in place while preserving existing functionality |
 
 ## Key Concepts
 
