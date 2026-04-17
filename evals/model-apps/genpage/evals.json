@@ -1,324 +1,405 @@
 {
   "skill_name": "genpage",
-  "eval_instructions": "When running these evals, the agent MUST save a workflow-log.md file alongside the generated code. The log must document every phase attempted (Phase 0 through Phase 8), including: agents invoked, commands run (or attempted), questions asked, files read, decisions made, and infrastructure barriers encountered. This is required for grading workflow-level assertions.",
+  "eval_instructions": "See eval-runbook.md in this folder for how to run these evals, how the 3-layer check works (workflow → code quality → UX rubric), and what pass/fail means. Every eval run MUST save a workflow-log.md file documenting all phases attempted — agents invoked, commands run, questions asked, files read, decisions made.",
+  "common_workflow_assertions": [
+    "A workflow-log.md file is saved to the working directory documenting all phases attempted",
+    "Phase 0: A working directory is created with a kebab-case name derived from the user's description",
+    "Phase 1 (Planner): node --version and pac help are run separately (not chained with &&) and PAC CLI version >= 2.7.0 is verified",
+    "Phase 1 (Planner): pac auth list is run and the active environment is identified and reported to the user",
+    "Phase 1 (Planner): Question 1 (new or edit) is asked via AskUserQuestion",
+    "Phase 1 (Planner): The plan is presented via EnterPlanMode and user approval is requested",
+    "Phase 1 (Planner): genpage-plan.md is written to the working directory, conforming to references/genpage-plan-schema.md"
+  ],
+  "common_code_assertions": [
+    "Generated .tsx is a single file with `export default GeneratedComponent`",
+    "Generated .tsx destructures props including `pageInput` (e.g., `const { dataApi, pageInput } = props;`)",
+    "Generated .tsx imports types from `./RuntimeTypes` (for Dataverse pages) or uses realistic inline mock data (for mock pages)",
+    "Generated .tsx uses `makeStyles` with tokens for styling — no inline styles for static values",
+    "Generated .tsx does NOT use `100vh` or `100vw`",
+    "Generated .tsx does NOT import `createTheme`, `mergeThemes`, or `useTheme` (these do not exist in Fluent UI V9)",
+    "Generated .tsx does NOT wrap content in a top-level `<FluentProvider>` (already provided at root)",
+    "Generated .tsx does NOT use React Router or construct raw URLs / manipulate `window.location` for navigation",
+    "Generated .tsx uses `Xrm.Navigation.navigateTo` for any in-app navigation",
+    "Generated .tsx uses Fluent UI icons in unsized form (e.g., `AddRegular`, not `Add24Regular`)",
+    "Generated .tsx wraps async `dataApi` calls in try-catch (Dataverse pages only)",
+    "Generated .tsx does NOT include any `TODO`, `FIXME`, ellipsis placeholders, or incomplete function bodies",
+    "Generated .tsx for lookup display names uses `@OData.Community.Display.V1.FormattedValue` annotations, not lookup-name fields in $select",
+    "For DataGrids, generated .tsx imports `createTableColumn` from `@fluentui/react-components`"
+  ],
   "evals": [
     {
       "id": 1,
+      "tier": "smoke",
       "prompt": "Build a page showing Account records as a gallery of cards. Include name, website, email, phone number. Make the gallery scrollable and each card clickable to open the Account record.",
-      "expected_output": "The orchestrator creates a working directory, invokes the genpage-planner agent which validates prerequisites (node, pac), authenticates with PAC CLI, runs pac model list-languages, gathers requirements (acknowledges the description, confirms Dataverse entity usage with Account table), detects the account entity exists, checks for available apps and asks user to select one, presents a plan via plan mode, and writes genpage-plan.md. The orchestrator then generates RuntimeTypes.ts via pac model genpage generate-types, invokes genpage-page-builder which reads genpage-plan.md, RuntimeTypes.ts, genpage-rules-reference.md and a relevant sample (8-responsive-cards.tsx), and generates a complete .tsx file using only verified column names. The orchestrator deploys with pac model genpage upload, offers browser verification, and provides a final summary.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entities: account",
+          "specific_requirements": "Responsive card layout, each card clickable to open the Account record"
+        },
+        "app_selection": "user selects an existing app from pac model list"
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 0: A working directory is created with a kebab-case name derived from the user's description",
-        "Phase 1 (Planner): node --version is run to verify Node.js is installed",
-        "Phase 1 (Planner): pac help is run and PAC CLI version >= 2.7.0 is verified",
-        "Phase 1 (Planner): Commands are run separately — not chained with &&",
-        "Phase 1 (Planner): pac auth list is run to check authentication",
-        "Phase 1 (Planner): The active environment is identified and reported to the user",
-        "Phase 1 (Planner): pac model list-languages is run after confirming the active environment",
-        "Phase 1 (Planner): Question 1 (new or edit) is asked via AskUserQuestion",
-        "Phase 1 (Planner): Question 2 (describe the page) is skipped because the user provided a description with the command",
-        "Phase 1 (Planner): Question 3 (Dataverse or mock data) is skipped because the description specifies Account table",
-        "Phase 1 (Planner): Question 4 (specific requirements) is asked via AskUserQuestion",
-        "Phase 1 (Planner): Entity detection runs pac model list-tables --search to check entity existence",
-        "Phase 1 (Planner): pac model list is run to check available apps",
-        "Phase 1 (Planner): User is asked which app to use (if multiple) or to confirm (if one)",
-        "Phase 1 (Planner): A plan is presented via plan mode listing data source (Account entity), features, Fluent UI components, and layout approach",
-        "Phase 1 (Planner): User confirmation is requested before proceeding",
-        "Phase 1 (Planner): genpage-plan.md is written to the working directory",
-        "Phase 2: Entity builder is SKIPPED because account entity already exists",
-        "Phase 4: pac model genpage generate-types --data-sources 'account' is run to generate RuntimeTypes.ts in the working directory",
-        "Phase 4: RuntimeTypes.ts is read to verify it generated correctly",
-        "Phase 5 (Page Builder): genpage-plan.md is read to extract page specification",
-        "Phase 5 (Page Builder): RuntimeTypes.ts is read to identify actual column names on the account entity",
-        "Phase 5 (Page Builder): Only column names found in RuntimeTypes.ts are used in the generated code — no guessed names",
-        "Phase 5 (Page Builder): genpage-rules-reference.md is read before generating code",
-        "Phase 5 (Page Builder): A relevant sample file is read (e.g., 8-responsive-cards.tsx for a card layout)",
-        "Phase 5 (Page Builder): Generated code uses React 17 + TypeScript with Fluent UI V9 components",
-        "Phase 5 (Page Builder): Generated code is a single .tsx file with export default GeneratedComponent",
-        "Phase 5 (Page Builder): Generated code uses makeStyles with tokens — not inline styles for static values",
-        "Phase 5 (Page Builder): Generated code wraps dataApi calls in try-catch",
-        "Phase 5 (Page Builder): Generated code uses @OData.Community.Display.V1.FormattedValue for lookup display names",
-        "Phase 5 (Page Builder): No placeholders, TODOs, or ellipses in the generated code",
-        "Phase 5 (Page Builder): Code is saved to a .tsx file in the working directory",
-        "Phase 6: pac model genpage upload is run with --app-id, --code-file, --data-sources, --prompt, --model, --name, --agent-message, --add-to-sitemap flags",
-        "Phase 7: User is asked about browser verification via AskUserQuestion",
-        "Phase 8: Final summary includes confirmation, how to find the page, and offer to make updates"
+        "Phase 1 (Planner): pac model list-tables --search 'account' is run and results are filtered by exact logical-name match",
+        "Phase 1 (Planner): Account entity is detected as existing; plan records no entity creation required",
+        "Phase 2: Entity-builder is SKIPPED (no entities to create)",
+        "Phase 4: pac model genpage generate-types --data-sources 'account' --output-file <working-dir>/RuntimeTypes.ts is run",
+        "Phase 5 (Page Builder): genpage-page-builder is invoked with Data mode: dataverse and RuntimeTypes path",
+        "Phase 5 (Page Builder): A relevant sample file is read (e.g., 8-responsive-cards.tsx for card layout)",
+        "Phase 5 (Page Builder): Generated .tsx uses only column names verified from RuntimeTypes.ts — no guessed names",
+        "Phase 6: pac model genpage upload includes --app-id, --code-file, --data-sources 'account', --prompt, --model, --name, --agent-message, --add-to-sitemap"
       ]
     },
     {
       "id": 2,
+      "tier": "smoke",
       "prompt": "Create a dashboard page with mock data showing sales metrics — monthly revenue chart, top 5 customers table, and a KPI summary bar. Use a modern dark theme look.",
-      "expected_output": "The orchestrator creates a working directory, invokes genpage-planner which validates prerequisites, authenticates, detects languages, gathers requirements (confirms mock data usage, notes dark theme preference), presents a plan, and writes genpage-plan.md. Entity builder and RuntimeTypes generation are skipped (mock data). The orchestrator invokes genpage-page-builder which reads the plan and rules, generates a complete .tsx with D3.js for the chart, realistic mock data, Fluent UI V9 DataGrid for the table, and styled KPI cards using makeStyles with tokens. Deploys without --data-sources flag.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Mock data",
+          "specific_requirements": "Modern dark theme look"
+        },
+        "app_selection": "user selects an existing app"
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 0: A working directory is created with a kebab-case name",
-        "Phase 1 (Planner): node --version and pac help are run separately",
-        "Phase 1 (Planner): pac auth list is run and environment is confirmed",
-        "Phase 1 (Planner): pac model list-languages is run after confirming the environment",
-        "Phase 1 (Planner): Question 1 (new or edit) is asked",
-        "Phase 1 (Planner): Question 2 is skipped because user provided a description",
-        "Phase 1 (Planner): Question 3 (Dataverse or mock data) is skipped because user said 'mock data'",
-        "Phase 1 (Planner): Question 4 (specific requirements) is asked — dark theme is acknowledged",
-        "Phase 1 (Planner): Plan mentions mock data, D3.js for chart, DataGrid for customers, KPI cards",
-        "Phase 1 (Planner): genpage-plan.md is written to the working directory",
-        "Phase 2: Entity builder is SKIPPED (mock data — no entities to create)",
-        "Phase 4: RuntimeTypes generation is SKIPPED because mock data was chosen",
-        "Phase 5 (Page Builder): genpage-plan.md is read",
-        "Phase 5 (Page Builder): genpage-rules-reference.md is read",
-        "Phase 5 (Page Builder): A relevant sample is read for reference",
-        "Phase 5 (Page Builder): Generated code includes realistic mock data (not empty arrays or placeholder values)",
-        "Phase 5 (Page Builder): Chart uses D3.js — no other charting libraries",
-        "Phase 5 (Page Builder): D3 code uses group() not nest()",
-        "Phase 5 (Page Builder): DataGrid uses createTableColumn from Fluent UI V9",
-        "Phase 5 (Page Builder): Code does NOT use 100vh or 100vw",
-        "Phase 5 (Page Builder): Code does NOT import from React Router or external libraries beyond React, Fluent UI V9, Fluent icons, D3",
-        "Phase 5 (Page Builder): Code does NOT use createTheme, mergeThemes, or useTheme",
-        "Phase 5 (Page Builder): Code does NOT wrap content in FluentProvider",
+        "Phase 1 (Planner): Data source question is skipped or answered 'mock data' — no entity detection needed",
+        "Phase 1 (Planner): Plan mentions mock data, D3.js for chart, DataGrid for customers table, KPI cards",
+        "Phase 2: Entity-builder is SKIPPED (mock data)",
+        "Phase 4: RuntimeTypes generation is SKIPPED (mock data)",
+        "Phase 5 (Page Builder): genpage-page-builder is invoked with Data mode: mock",
+        "Phase 5 (Page Builder): Generated .tsx includes realistic mock data (not empty arrays or identical values)",
+        "Phase 5 (Page Builder): Chart uses D3.js exclusively — no Chart.js, Recharts, or other libraries. D3 code uses group() not nest()",
         "Phase 5 (Page Builder): DatePicker (if used) is imported from @fluentui/react-datepicker-compat, not @fluentui/react-components",
-        "Phase 5 (Page Builder): Icons use unsized variants (e.g., AddRegular not Add24Regular)",
-        "Phase 5 (Page Builder): Generated code is a single .tsx file with export default GeneratedComponent",
-        "Phase 6: Deployment command omits --data-sources flag (mock data page)"
+        "Phase 6: Deployment omits --data-sources flag (mock data page)"
       ]
     },
     {
       "id": 3,
+      "tier": "smoke",
       "prompt": "I need to edit an existing generative page in my Sales Hub app. The page shows contacts but I want to add a search bar and sorting by company name.",
-      "expected_output": "The orchestrator invokes genpage-planner which asks Question 1 and the user indicates 'edit existing'. The planner returns { action: 'edit' } and the orchestrator follows the Edit Flow. The orchestrator asks for app-id and page-id, downloads the existing page (producing page.tsx, page.js, config.json, prompt.txt inside a <page-id>/ subfolder), generates RuntimeTypes.ts from config.json.dataSources if needed, invokes genpage-edit-planner to read the download artifacts and produce an edit plan, then applies the plan's changes inline via Edit tool, and deploys with --page-id (no --add-to-sitemap).",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Edit existing",
+          "app_and_page": "user provides app-id and page-id of an existing contacts page",
+          "changes": "Add a search bar and column sorting by company name"
+        }
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 1 (Planner): Question 1 is asked and the user answers 'edit existing'",
-        "Phase 1 (Planner): Planner returns { action: 'edit' } so Phases 2-8 of the create flow are skipped",
+        "Phase 1 (Planner): User indicates 'edit existing'; planner returns { action: 'edit' }, skipping Phases 2-8 of the create flow",
         "Edit Phase 1: User is asked for app-id and page-id via AskUserQuestion",
-        "Edit Phase 2: pac model genpage download is run, producing <working-dir>/<page-id>/page.tsx, page.js, config.json, prompt.txt",
-        "Edit Phase 3: config.json is read; since dataSources is non-empty (contact), RuntimeTypes.ts is generated for those entities",
+        "Edit Phase 2: pac model genpage download produces <working-dir>/<page-id>/ with page.tsx, page.js, config.json, prompt.txt",
+        "Edit Phase 3: config.json is read; since dataSources contains 'contact', RuntimeTypes.ts is generated",
         "Edit Phase 4: genpage-edit-planner agent is invoked via Task tool",
         "Edit Phase 4: edit-planner reads page.tsx, config.json, and prompt.txt from the <page-id>/ folder",
         "Edit Phase 4: genpage-edit-plan.md is written to the working directory root (not inside <page-id>/)",
         "Edit Phase 5: Orchestrator reads genpage-edit-plan.md, genpage-rules-reference.md, RuntimeTypes.ts, and page.tsx",
         "Edit Phase 5: Orchestrator applies edits inline using Edit tool on <working-dir>/<page-id>/page.tsx",
-        "Edit Phase 5: Search implementation uses Fluent UI V9 SearchBox or Input component",
-        "Edit Phase 5: Sort implementation uses column header click handlers or Fluent UI sorting",
+        "Edit Phase 5: Search implementation uses Fluent UI V9 SearchBox or Input; sort uses column header handlers",
         "Edit Phase 5: Existing functionality is preserved per the edit plan's Preservation Constraints",
-        "Edit Phase 6: pac model genpage upload uses --page-id flag and --code-file points to <working-dir>/<page-id>/page.tsx",
-        "Edit Phase 6: Upload command omits --add-to-sitemap (existing page update)",
-        "Edit Phase 7: Browser verification is offered",
-        "Edit Phase 8: workflow-log.md is written"
+        "Edit Phase 6: pac model genpage upload uses --page-id flag; omits --add-to-sitemap"
       ]
     },
     {
       "id": 4,
+      "tier": "full",
       "prompt": "Build a multi-step wizard form for creating new Case records. Step 1: customer info. Step 2: case details (title, priority, category). Step 3: review and submit. Use the incident and contact tables.",
-      "expected_output": "The orchestrator creates a working directory, invokes genpage-planner which validates prerequisites, authenticates, detects languages, gathers remaining requirements, detects that incident and contact entities exist, checks apps, presents a plan for a 3-step wizard, and writes genpage-plan.md. The orchestrator generates RuntimeTypes.ts for incident and contact entities, then invokes genpage-page-builder which reads the plan, schema, genpage-rules-reference.md and the wizard sample (2-wizard-multi-step.tsx), and generates a complete .tsx with step navigation (Next/Back), form validation, Fluent UI V9 form components, and dataApi.createRow for submission. Deploys with --data-sources 'incident,contact'.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entities: incident, contact (skipped because prompt specifies them)",
+          "specific_requirements": "3-step wizard with Next/Back navigation, form validation, review before submit"
+        },
+        "app_selection": "user selects an existing app"
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 0: Working directory created",
-        "Phase 1 (Planner): Prerequisites validated with separate commands",
-        "Phase 1 (Planner): Authentication confirmed, pac model list-languages run",
-        "Phase 1 (Planner): Question 2 is skipped (user provided description)",
-        "Phase 1 (Planner): Question 3 is skipped (user specified incident and contact tables)",
-        "Phase 1 (Planner): Plan includes 3-step wizard structure, form fields per step, Fluent UI form components",
-        "Phase 1 (Planner): genpage-plan.md is written to the working directory",
-        "Phase 2: Entity builder is SKIPPED because incident and contact entities already exist",
+        "Phase 1 (Planner): pac model list-tables --search 'incident,contact' is run; both entities confirmed as existing",
+        "Phase 2: Entity-builder is SKIPPED",
         "Phase 4: pac model genpage generate-types --data-sources 'incident,contact' is run",
-        "Phase 4: RuntimeTypes.ts is read and column names are verified for both incident and contact entities",
-        "Phase 5 (Page Builder): genpage-rules-reference.md is read",
         "Phase 5 (Page Builder): Wizard sample (2-wizard-multi-step.tsx or 3-poa-revocation-wizard.tsx) is read",
-        "Phase 5 (Page Builder): Generated code includes step state management (current step tracking)",
-        "Phase 5 (Page Builder): Next and Back buttons navigate between steps",
+        "Phase 5 (Page Builder): Generated code includes step state management (current step tracking) and Next/Back navigation",
         "Phase 5 (Page Builder): Step 3 (review) shows a summary of entered data before submission",
         "Phase 5 (Page Builder): Submit uses dataApi.createRow with verified column names from RuntimeTypes.ts",
         "Phase 5 (Page Builder): Form uses Fluent UI V9 components (Input, Dropdown, etc.) — not HTML form elements",
         "Phase 5 (Page Builder): All form fields have aria-labels or aria-labelledby for accessibility",
-        "Phase 5 (Page Builder): Semantic HTML is used (button, section, etc.)",
-        "Phase 5 (Page Builder): async dataApi calls are wrapped in try-catch with error handling",
-        "Phase 5 (Page Builder): Generated code is a single .tsx file with export default GeneratedComponent",
         "Phase 6: Upload includes --data-sources 'incident,contact'"
       ]
     },
     {
       "id": 5,
+      "tier": "full",
       "prompt": "/genpage Build a task management board with columns for To Do, In Progress, and Done. Use the task entity. Allow dragging tasks between columns.",
-      "expected_output": "The orchestrator creates a working directory, invokes genpage-planner which validates prerequisites, authenticates, detects languages, gathers remaining requirements, detects the task entity exists, presents a plan for a kanban-style board, and writes genpage-plan.md. The orchestrator generates RuntimeTypes.ts for the task entity, then invokes genpage-page-builder which reads the plan, schema, and rules, and generates a complete .tsx with column-based layout, task cards, drag-and-drop using native HTML5 drag events (no external DnD libraries), and dataApi.updateRow to persist status changes.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entity: task (skipped because prompt specifies it)",
+          "specific_requirements": "Kanban layout with drag-and-drop between columns mapped to status values"
+        },
+        "app_selection": "user selects an existing app"
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 0: Working directory created",
-        "Phase 1 (Planner): Prerequisites validated",
-        "Phase 1 (Planner): Authentication confirmed, pac model list-languages run",
-        "Phase 1 (Planner): Description is acknowledged from the command — question 2 is skipped",
-        "Phase 1 (Planner): Question 3 is skipped (user specified task entity)",
-        "Phase 1 (Planner): Plan describes kanban board with 3 columns mapped to task status values",
-        "Phase 1 (Planner): genpage-plan.md is written to the working directory",
-        "Phase 4: pac model genpage generate-types --data-sources 'task' is run",
+        "Phase 1 (Planner): task entity confirmed as existing; plan describes kanban with 3 columns mapped to task statecode/statuscode values",
         "Phase 4: RuntimeTypes.ts is read — status field enum values are identified for column mapping",
         "Phase 5 (Page Builder): Drag-and-drop uses native HTML5 events (onDragStart, onDragOver, onDrop) — no external DnD library",
-        "Phase 5 (Page Builder): Task cards show relevant fields verified from RuntimeTypes.ts",
         "Phase 5 (Page Builder): Status update on drop uses dataApi.updateRow with the correct status enum value",
         "Phase 5 (Page Builder): Code uses entity logical name 'task' (singular lowercase) not 'tasks'",
-        "Phase 5 (Page Builder): Responsive layout uses flexbox with relative units",
-        "Phase 5 (Page Builder): No 100vh or 100vw used",
-        "Phase 5 (Page Builder): All components and utilities are separate top-level functions (no nested functions)",
-        "Phase 5 (Page Builder): Generated code is a single .tsx file with export default GeneratedComponent"
+        "Phase 5 (Page Builder): All components and utilities are separate top-level functions (no nested function definitions)"
       ]
     },
     {
       "id": 6,
+      "tier": "full",
       "prompt": "Create a simple analytics dashboard with mock data. I just want some charts showing website traffic trends and visitor demographics. Keep it clean and minimal.",
-      "expected_output": "The orchestrator creates a working directory, invokes genpage-planner which validates prerequisites, authenticates, detects languages, confirms mock data usage, presents a minimal plan, and writes genpage-plan.md. Schema generation and entity builder are skipped. The orchestrator invokes genpage-page-builder which reads the plan and rules, and generates a clean .tsx with D3.js charts for traffic trends (line/area chart) and demographics (pie/bar chart), realistic mock data, and minimal Fluent UI styling. Deploys without --data-sources.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Mock data",
+          "specific_requirements": "Clean and minimal design"
+        },
+        "app_selection": "user selects an existing app"
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 0: Working directory created",
-        "Phase 1 (Planner): node --version and pac help are run separately",
-        "Phase 1 (Planner): pac auth list is run and environment is confirmed",
-        "Phase 1 (Planner): pac model list-languages is run after confirming the environment",
-        "Phase 1 (Planner): Question 1 (new or edit) is asked",
-        "Phase 1 (Planner): Question 2 is skipped because user provided a description",
-        "Phase 1 (Planner): Mock data usage is confirmed (no Dataverse entities)",
-        "Phase 1 (Planner): Plan reflects minimal/clean design preference",
-        "Phase 1 (Planner): genpage-plan.md is written to the working directory",
-        "Phase 2: Entity builder is SKIPPED (mock data)",
+        "Phase 2: Entity-builder is SKIPPED (mock data)",
         "Phase 4: RuntimeTypes generation is SKIPPED (mock data)",
-        "Phase 5 (Page Builder): genpage-rules-reference.md is read",
         "Phase 5 (Page Builder): Charts use D3.js exclusively — no Chart.js, Recharts, or other chart libraries",
-        "Phase 5 (Page Builder): Mock data is realistic (not empty arrays or identical values)",
+        "Phase 5 (Page Builder): Mock data is realistic (not empty arrays, not identical values)",
         "Phase 5 (Page Builder): Generated code has no unnecessary complexity matching the 'clean and minimal' request",
-        "Phase 5 (Page Builder): Code uses makeStyles with Fluent UI tokens for styling",
-        "Phase 5 (Page Builder): Generated code is a single .tsx file with export default GeneratedComponent",
-        "Phase 5 (Page Builder): No placeholders, TODOs, or ellipses in the generated code",
         "Phase 6: Upload omits --data-sources flag"
       ]
     },
     {
       "id": 7,
+      "tier": "full",
       "prompt": "Build a page showing all job candidates with their application status, interview scores, and assigned recruiter. I need new tables for this — cr_candidate and cr_jobrequisition entities don't exist yet in my environment.",
-      "expected_output": "The orchestrator creates a working directory, invokes genpage-planner which validates prerequisites, authenticates, gathers requirements, runs pac model list-tables --search to detect that cr_candidate and cr_jobrequisition entities do NOT exist, checks available apps, presents a plan showing entities to create (with columns, relationships, choices), and writes genpage-plan.md. The orchestrator invokes genpage-entity-builder which reads the plan, creates tables/columns/relationships in dependency order, asks about sample data, and returns. The orchestrator generates RuntimeTypes.ts, invokes genpage-page-builder to generate the .tsx, and deploys.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entities: cr_candidate, cr_jobrequisition (new entities to create)",
+          "specific_requirements": "Candidate list with status, interview scores, assigned recruiter",
+          "sample_data": "Yes, add sample data"
+        },
+        "app_selection": "user selects an existing app"
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 0: Working directory created",
-        "Phase 1 (Planner): Prerequisites validated",
-        "Phase 1 (Planner): Authentication confirmed",
-        "Phase 1 (Planner): pac model list-tables --search is run to check entity existence",
-        "Phase 1 (Planner): cr_candidate and cr_jobrequisition are identified as NOT existing",
-        "Phase 1 (Planner): pac model list is run to check available apps",
-        "Phase 1 (Planner): Plan includes entities to create with column definitions, types, and relationships",
-        "Phase 1 (Planner): Plan specifies a lookup relationship from cr_candidate to cr_jobrequisition",
-        "Phase 1 (Planner): genpage-plan.md is written to the working directory",
-        "Phase 2 (Entity Builder): genpage-plan.md is read to extract entity specifications",
-        "Phase 2 (Entity Builder): Dataverse plugin readiness is verified (.env, scripts/auth.py)",
-        "Phase 2 (Entity Builder): Independent table (cr_jobrequisition) is created BEFORE the dependent table (cr_candidate with lookup)",
-        "Phase 2 (Entity Builder): Propagation delay (3-5s) is observed after table creation before adding columns",
-        "Phase 2 (Entity Builder): Relationships are created after both tables exist",
-        "Phase 2 (Entity Builder): User is asked about sample data via AskUserQuestion",
-        "Phase 2 (Entity Builder): Actual logical names are reported back (may be normalized by Dataverse)",
+        "Phase 1 (Planner): pac model list-tables --search confirms cr_candidate and cr_jobrequisition do NOT exist (exact logical-name match, not fuzzy)",
+        "Phase 1 (Planner): Plan includes entity definitions with columns, types, and a lookup relationship (cr_candidate → cr_jobrequisition)",
+        "Phase 2a: Orchestrator probes Dataverse MCP list_tables availability BEFORE invoking entity-builder",
+        "Phase 2b (Entity Builder): Dataverse plugin readiness is verified",
+        "Phase 2b (Entity Builder): cr_jobrequisition (independent) is created BEFORE cr_candidate (has lookup)",
+        "Phase 2b (Entity Builder): Propagation delay (3-5s) is observed after table creation before adding columns",
+        "Phase 2b (Entity Builder): Relationships are created after both tables exist; propagation delay (5-10s) before using @odata.bind",
+        "Phase 2b (Entity Builder): User is asked about sample data via AskUserQuestion",
+        "Phase 2b (Entity Builder): Actual logical names are reported back (may be normalized by Dataverse)",
         "Phase 4: pac model genpage generate-types is run with the created entity names",
-        "Phase 4: RuntimeTypes.ts is read to verify correct column names",
         "Phase 5 (Page Builder): Generated code uses ONLY verified column names from RuntimeTypes.ts",
-        "Phase 5 (Page Builder): Generated code is a single .tsx file with export default GeneratedComponent",
-        "Phase 6: pac model genpage upload includes --data-sources with the created entities"
+        "Phase 6: Upload includes --data-sources with both created entity names"
       ]
     },
     {
       "id": 8,
+      "tier": "full",
       "prompt": "Create a dashboard page with account metrics. I don't have any model-driven apps yet.",
-      "expected_output": "The orchestrator creates a working directory, invokes genpage-planner which validates prerequisites, authenticates, gathers requirements (account metrics with Dataverse), detects the account entity exists, runs pac model list which returns zero apps, asks the user whether to create a new app or cancel. User chooses to create. The planner includes 'create new app' in the plan and writes genpage-plan.md. The orchestrator creates the app via pac model create, generates RuntimeTypes.ts, invokes genpage-page-builder, and deploys to the newly created app.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entity: account",
+          "specific_requirements": "Account metrics dashboard"
+        },
+        "app_selection": "pac model list returns zero apps; user chooses to create a new app named 'Account Metrics'"
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 0: Working directory created",
-        "Phase 1 (Planner): Prerequisites validated",
         "Phase 1 (Planner): pac model list returns zero apps",
         "Phase 1 (Planner): User is asked via AskUserQuestion whether to create a new app or cancel",
-        "Phase 1 (Planner): Plan indicates a new app needs to be created",
-        "Phase 1 (Planner): genpage-plan.md is written with app decision set to 'create new'",
-        "Phase 3: pac model create is run to create a new model-driven app",
-        "Phase 3: The new app-id is stored for deployment",
-        "Phase 4: pac model genpage generate-types --data-sources 'account' is run",
-        "Phase 5 (Page Builder): .tsx file is generated",
-        "Phase 6: pac model genpage upload uses the newly created app-id"
+        "Phase 1 (Planner): Plan records 'create new app' decision",
+        "Phase 3: pac model create --name 'Account Metrics' is run",
+        "Phase 3: The new app-id returned from pac model create is stored for Phase 6",
+        "Phase 6: Upload uses the newly created app-id"
       ]
     },
     {
       "id": 9,
+      "tier": "full",
       "prompt": "Build a project tracker page. I need new cr_project and cr_milestone entities with sample data to test the page.",
-      "expected_output": "The orchestrator invokes genpage-planner which detects cr_project and cr_milestone don't exist via pac model list-tables --search, presents a plan with entity specifications. The orchestrator invokes genpage-entity-builder which creates the entities, asks about sample data (user says yes since they explicitly requested it), and inserts realistic sample records. The orchestrator generates RuntimeTypes, invokes page-builder, and deploys.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entities: cr_project, cr_milestone (new)",
+          "specific_requirements": "Project tracker with milestones; include sample data"
+        },
+        "app_selection": "user selects an existing app",
+        "sample_data_response": "Yes, add sample data"
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 1 (Planner): pac model list-tables --search confirms cr_project and cr_milestone do NOT exist",
-        "Phase 1 (Planner): Plan includes entity definitions for cr_project and cr_milestone",
-        "Phase 1 (Planner): Plan includes a relationship (cr_milestone has lookup to cr_project)",
-        "Phase 2 (Entity Builder): cr_project is created first (independent table)",
-        "Phase 2 (Entity Builder): cr_milestone is created second (depends on cr_project for lookup)",
-        "Phase 2 (Entity Builder): User is asked about sample data via AskUserQuestion",
-        "Phase 2 (Entity Builder): Sample data is created because user explicitly requested it",
-        "Phase 2 (Entity Builder): Sample records are realistic (not lorem ipsum or empty values)",
-        "Phase 2 (Entity Builder): Sample records respect relationships (milestones reference valid project IDs)",
-        "Phase 4: RuntimeTypes.ts is generated for both entities",
-        "Phase 5 (Page Builder): Generated code uses verified column names from RuntimeTypes.ts",
+        "Phase 1 (Planner): cr_project and cr_milestone confirmed as NOT existing",
+        "Phase 1 (Planner): Plan includes a lookup relationship (cr_milestone → cr_project)",
+        "Phase 2a: Orchestrator probes Dataverse MCP availability before invoking entity-builder",
+        "Phase 2b (Entity Builder): cr_project (independent) is created first; cr_milestone (dependent) is created second",
+        "Phase 2b (Entity Builder): Sample data is created because the user explicitly requested it in the prompt",
+        "Phase 2b (Entity Builder): Sample records are realistic (not lorem ipsum or empty values)",
+        "Phase 2b (Entity Builder): Sample records respect relationships (milestones reference valid project IDs)",
         "Phase 6: Deployment includes --data-sources with both entity names"
       ]
     },
     {
       "id": 10,
+      "tier": "stress",
       "prompt": "Build a page for my new cr_widget entity that doesn't exist yet.",
-      "expected_output": "The orchestrator invokes genpage-planner which runs pac model list-tables --search to check if cr_widget exists. It does not. The planner records entity creation in the plan. In Phase 2a the orchestrator probes for Dataverse MCP availability. If the MCP tool is unavailable (plugin not installed), the orchestrator tells the user to install microsoft/Dataverse-skills and halts. If the MCP is available but returns an auth error (plugin installed but not connected), the orchestrator tells the user to run /dv-connect and halts. Only when the probe succeeds does the orchestrator invoke genpage-entity-builder.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entity: cr_widget (new, does not exist)"
+        },
+        "environment_state": "Dataverse Skills plugin is NOT installed (or installed but not connected)"
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 1 (Planner): pac model list-tables --search 'cr_widget' is run",
         "Phase 1 (Planner): cr_widget is identified as NOT existing (exact logical-name match, not fuzzy)",
         "Phase 1 (Planner): Plan records cr_widget under Entity Creation Required",
         "Phase 2a: Orchestrator probes Dataverse MCP list_tables tool availability BEFORE invoking entity-builder",
-        "Phase 2a: If Dataverse MCP is NOT installed, user is told to install microsoft/Dataverse-skills and workflow halts",
-        "Phase 2a: If Dataverse MCP is installed but returns auth error, user is told to run /dv-connect and workflow halts",
-        "Phase 2b: genpage-entity-builder is only invoked after the probe succeeds"
+        "Phase 2a: If MCP is NOT installed, user is told to install microsoft/Dataverse-skills and workflow halts (entity-builder is NOT invoked)",
+        "Phase 2a: If MCP is installed but returns auth error, user is told to run /dv-connect and workflow halts",
+        "Phase 2b: genpage-entity-builder is only invoked AFTER the probe succeeds"
       ]
     },
     {
       "id": 11,
+      "tier": "full",
       "prompt": "Build me three pages for a recruitment app: a candidate list page, an interview schedule page, and a hiring metrics dashboard. Use the contact and appointment entities.",
-      "expected_output": "The orchestrator creates a working directory, invokes genpage-planner which validates prerequisites, authenticates, detects that contact and appointment entities exist, checks available apps, presents a plan with 3 pages (candidate list, interview schedule, hiring metrics), and writes genpage-plan.md. The orchestrator generates RuntimeTypes.ts once for both entities, then invokes 3 genpage-page-builder agents in parallel (all in a single message). Each builder writes its own .tsx file. The orchestrator deploys all 3 pages sequentially.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entities: contact, appointment (skipped because prompt specifies them)",
+          "specific_requirements": "Three distinct pages sharing the contact and appointment entities"
+        },
+        "app_selection": "user selects an existing app"
+      },
       "expectations": [
-        "A workflow-log.md file is saved documenting all phases attempted",
-        "Phase 0: A single working directory is created for all pages",
-        "Phase 1 (Planner): Plan includes 3 pages in the pages table",
-        "Phase 1 (Planner): Each page has a distinct file name, purpose, and entity assignments",
-        "Phase 1 (Planner): genpage-plan.md contains per-page specifications for all 3 pages",
-        "Phase 2: Entity builder is SKIPPED (contact and appointment entities already exist)",
-        "Phase 4: pac model genpage generate-types is run ONCE with --data-sources 'contact,appointment'",
-        "Phase 4: A single RuntimeTypes.ts is generated covering both entities",
-        "Phase 5: Three genpage-page-builder agents are invoked in a SINGLE message (parallel execution)",
-        "Phase 5: Each builder reads the same genpage-plan.md but extracts only its own page specification",
-        "Phase 5: Each builder reads the same RuntimeTypes.ts for column verification",
-        "Phase 5: Each builder writes a separate .tsx file to the working directory",
-        "Phase 5: No builder modifies another builder's file",
-        "Phase 5 (Page Builder): All 3 .tsx files use export default GeneratedComponent",
-        "Phase 5 (Page Builder): All 3 .tsx files follow genpage-rules-reference.md rules",
-        "Phase 6: All 3 pages are deployed via separate pac model genpage upload commands",
-        "Phase 6: Each upload uses the correct --code-file for that page",
+        "Phase 1 (Planner): Plan includes 3 pages in the Pages table with distinct file names and purposes",
+        "Phase 1 (Planner): Per-Page Specifications section has an entry for each of the 3 pages",
+        "Phase 5a: Orchestrator validates the plan — at least one page, unique filenames, each page has a matching Per-Page Specifications subsection",
+        "Phase 4: pac model genpage generate-types is run ONCE with --data-sources 'contact,appointment'; a single RuntimeTypes.ts is generated",
+        "Phase 5b: Three genpage-page-builder agents are invoked in a SINGLE message (parallel execution, not sequential)",
+        "Phase 5b: Each builder receives a distinct target filename — no two builders target the same file",
+        "Phase 5b: Each builder reads the same genpage-plan.md but extracts only its own page specification",
+        "Phase 5b: Each builder reads the same RuntimeTypes.ts for column verification",
+        "Phase 6: All 3 pages are deployed via separate pac model genpage upload commands, each with the correct --code-file",
         "Phase 8: Summary table lists all 3 pages with their files, entities, and deployment status"
       ]
     },
     {
       "id": 12,
+      "tier": "stress",
       "prompt": "Build a page showing Account records with a filter toolbar and sortable columns.",
-      "expected_output": "This eval tests the plan revision loop. The orchestrator invokes genpage-planner. After presenting the initial plan via plan mode, the user requests a change (e.g., 'add a search box too'). The planner revises the plan and re-enters plan mode. The user approves the revised plan. The workflow then proceeds normally through Phases 2-8.",
-      "files": [],
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entity: account",
+          "specific_requirements": "Filter toolbar and sortable columns"
+        },
+        "plan_revision_scenario": "On first plan presentation the user rejects via ExitPlanMode with 'add a search box in addition to the filter toolbar'; the planner revises the plan and re-enters plan mode; the user approves the revised plan"
+      },
       "expectations": [
         "Phase 1 (Planner): Initial plan is presented via EnterPlanMode",
-        "Phase 1 (Planner): User requests a revision (simulated by returning changes-requested from ExitPlanMode)",
+        "Phase 1 (Planner): User requests a revision (ExitPlanMode with changes-requested response)",
         "Phase 1 (Planner): Planner revises the plan based on user feedback and re-enters plan mode",
-        "Phase 1 (Planner): Revised plan reflects the user's requested changes",
+        "Phase 1 (Planner): Revised plan reflects the user's requested changes (search box added)",
         "Phase 1 (Planner): User approves the revised plan on the second presentation",
         "Phase 1 (Planner): genpage-plan.md reflects the approved (revised) version, not the initial version",
-        "Phase 5 (Page Builder): Generated code implements the revised plan"
+        "Phase 5 (Page Builder): Generated code implements the revised plan (includes BOTH filter toolbar AND search box)"
+      ]
+    },
+    {
+      "id": 13,
+      "tier": "full",
+      "prompt": "Build a page showing Contact records with name, email, and phone.",
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entity: contact",
+          "specific_requirements": "Contact list display"
+        },
+        "app_selection": "user selects an existing app",
+        "environment_state": "pac model list-languages returns multiple languages: English (1033), Arabic (1025), French (1036). This eval exercises the localization code path."
+      },
+      "expectations": [
+        "Phase 1 (Planner): pac model list-languages output includes Arabic (1025) and French (1036) in addition to English",
+        "Phase 1 (Planner): Plan includes a Localization section listing detected languages",
+        "Phase 5 (Page Builder): Generated .tsx includes language detection boilerplate using Xrm.Utility.getGlobalContext().userSettings.languageId",
+        "Phase 5 (Page Builder): Generated .tsx has a translations dictionary with entries for en-US, ar-SA, and fr-FR",
+        "Phase 5 (Page Builder): All user-visible text goes through a translate() helper — no hardcoded display strings in JSX",
+        "Phase 5 (Page Builder): RTL support is included (dir attribute set based on language.isRtl) because Arabic is a detected RTL language",
+        "Phase 5 (Page Builder): Generated .tsx uses logical CSS properties (marginInlineStart/End, paddingInlineStart/End) instead of physical (marginLeft/Right)",
+        "Phase 5 (Page Builder): Generated .tsx fetches usersettings via dataApi.retrieveRow and uses formatDate/formatNumber/formatCurrency helpers",
+        "Phase 5 (Page Builder): Generated .tsx does NOT hardcode currency symbols or date formats"
+      ]
+    },
+    {
+      "id": 14,
+      "tier": "stress",
+      "prompt": "Build two pages for tracking Account records — one for listing all accounts and one for editing a single account.",
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entity: account",
+          "specific_requirements": "Two pages — list and edit"
+        },
+        "app_selection": "user selects an existing app",
+        "planner_scenario": "The planner initially assigns the filename account.tsx to both pages in the Pages table. The orchestrator detects the collision in Phase 5a and must rewrite the plan to give the pages unique filenames before dispatching builders."
+      },
+      "expectations": [
+        "Phase 1 (Planner): Plan initially contains a Pages table with 2 pages",
+        "Phase 5a: Orchestrator reads the Pages table and detects duplicate filenames",
+        "Phase 5a: Orchestrator rewrites genpage-plan.md with unique filenames (e.g., account-list.tsx, account-edit.tsx) before dispatching builders",
+        "Phase 5b: Two page-builders are invoked in parallel with distinct target filenames",
+        "Phase 5b: No builder overwrites another builder's output (both .tsx files exist after Phase 5)",
+        "Phase 6: Both pages are deployed with their distinct filenames"
+      ]
+    },
+    {
+      "id": 15,
+      "tier": "full",
+      "prompt": "Build a page tracking support tickets. I need a new cr_ticket entity with a priority choice column (Low, Medium, High, Critical), a status choice column (Open, In Progress, Resolved, Closed), and a due date column.",
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entity: cr_ticket (new entity to create)",
+          "specific_requirements": "Ticket tracker with priority (4 choices), status (4 choices), and due date"
+        },
+        "app_selection": "user selects an existing app",
+        "sample_data_response": "No, skip sample data"
+      },
+      "expectations": [
+        "Phase 1 (Planner): cr_ticket is identified as NOT existing",
+        "Phase 1 (Planner): Plan includes choice column definitions for priority and status under Choice Columns, with numeric option values starting at 100000000",
+        "Phase 1 (Planner): Plan includes a datetime column for due date",
+        "Phase 2b (Entity Builder): cr_ticket is created via Dataverse MCP create_table or Python SDK",
+        "Phase 2b (Entity Builder): Choice columns are added using Python SDK with IntEnum classes (MCP create_table does not support choices directly)",
+        "Phase 2b (Entity Builder): Priority IntEnum has 4 values starting at 100000000 (Low=100000000, Medium=100000001, High=100000002, Critical=100000003)",
+        "Phase 2b (Entity Builder): Status IntEnum has 4 values starting at 100000000",
+        "Phase 4: pac model genpage generate-types picks up the enum registrations",
+        "Phase 5 (Page Builder): Generated .tsx uses the choice enum names from RuntimeTypes.ts (not magic numbers)",
+        "Phase 5 (Page Builder): Generated .tsx uses dataApi.getChoices() or reads FormattedValue annotations for choice display names"
+      ]
+    },
+    {
+      "id": 16,
+      "tier": "smoke",
+      "prompt": "Build a page showing Account records.",
+      "data": {
+        "question_answers": {
+          "new_or_edit": "Create new page(s)",
+          "data_source": "Dataverse entity: account",
+          "specific_requirements": "Simple account list"
+        },
+        "app_selection": "user selects an existing app"
+      },
+      "expectations": [
+        "Phase 1 (Planner): genpage-plan.md is written and conforms to references/genpage-plan-schema.md",
+        "Phase 1 (Planner): genpage-plan.md contains ALL required sections with exact headings: # Genpage Plan, ## User Requirements, ## Working Directory, ## Plugin Root, ## Environment, ## Pages, ## Entity Creation Required, ## Existing Entities, ## Design Preferences, ## Relevant Samples, ## Per-Page Specifications",
+        "Phase 1 (Planner): ## Pages table has at least one row with columns Page, File, Purpose, Entities",
+        "Phase 1 (Planner): ## Per-Page Specifications has one ### <Page Name> subsection for each row in ## Pages",
+        "Phase 1 (Planner): File names in ## Pages are unique",
+        "Phase 1 (Planner): Because the account entity exists, ## Entity Creation Required contains the literal string 'No entity creation required — all entities already exist.'",
+        "Phase 1 (Planner): ## Existing Entities contains the entity logical name used for RuntimeTypes generation (account)"
       ]
     }
   ]
