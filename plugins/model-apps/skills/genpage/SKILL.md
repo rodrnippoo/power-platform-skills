@@ -17,7 +17,7 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, Task, AskUserQuest
 
 ## Overview
 
-This skill orchestrates five specialist agents across the create and edit flows:
+This skill orchestrates four specialist agents across the create and edit flows:
 
 **Create flow:**
 1. **`genpage-planner`** — validates prerequisites, gathers requirements, detects what
@@ -27,15 +27,13 @@ This skill orchestrates five specialist agents across the create and edit flows:
 3. **`genpage-page-builder`** — generates one complete `.tsx` file per page; multiple
    builders run in parallel for multi-page requests
 
-**Edit flow (for complex edits only; simple edits stay inline):**
+**Edit flow:**
 
-4. **`genpage-edit-planner`** — analyzes an existing page, gathers change requirements,
-   presents an edit plan, writes `genpage-edit-plan.md`
-5. **`genpage-page-editor`** — applies planned edits to the existing `.tsx` in place
-   while preserving existing functionality
+4. **`genpage-edit-planner`** — reads the downloaded page artifacts, gathers change
+   requirements, presents an edit plan, writes `genpage-edit-plan.md`
 
 You (the skill) coordinate the agents and own app creation, RuntimeTypes generation,
-deployment, browser verification, and simple inline edits.
+deployment, browser verification, and the inline application of planned edits.
 
 ## References
 
@@ -349,14 +347,12 @@ Next steps: Share with team, iterate on design, create additional pages
 ## Edit Flow
 
 Triggered when the `genpage-planner` returns `{ "action": "edit" }` in Phase 1.
-The edit flow has a **simple/complex split** — simple edits are handled inline;
-complex edits are orchestrated through `genpage-edit-planner` and `genpage-page-editor`.
+The edit flow delegates planning to `genpage-edit-planner`, then applies the
+edit inline.
 
 ### Edit Phase 1: Gather Edit Target
 
-The planner has already:
-- Validated prereqs
-- Confirmed auth and environment
+The planner has already validated prereqs and confirmed auth.
 
 Ask the user (via `AskUserQuestion`) for the app-id and page-id of the page to edit.
 Accept either the app-id GUID or the app name (resolve via `pac model list`).
@@ -370,12 +366,23 @@ pac model genpage download `
   --output-directory <working-dir>
 ```
 
-The downloaded file appears as `<working-dir>/<page-name>.tsx`. Note the exact path.
+The download produces this structure:
+
+```
+<working-dir>/<page-id>/
+├── page.tsx        ← Source code
+├── page.js         ← Transpiled JS (ignore)
+├── config.json     ← { "dataSources": [...], "model": "..." }
+└── prompt.txt      ← Original --prompt used when the page was created
+```
+
+Note the exact page-id folder path — downstream steps operate on
+`<working-dir>/<page-id>/page.tsx`.
 
 ### Edit Phase 3: Generate RuntimeTypes (Conditional)
 
-Read the downloaded `.tsx` file. If it imports from `./RuntimeTypes` AND references
-any Dataverse entities via `dataApi`, generate the schema for those entities:
+Read `<working-dir>/<page-id>/config.json`. If `dataSources` is non-empty, the
+page uses Dataverse entities — generate the schema:
 
 ```powershell
 pac model genpage generate-types `
@@ -383,45 +390,10 @@ pac model genpage generate-types `
   --output-file <working-dir>/RuntimeTypes.ts
 ```
 
-If the page is mock-data only (no `dataApi` calls), skip this phase.
+Pass the exact entity list from `config.json.dataSources`. If `dataSources` is an
+empty array, the page is mock-data only — skip this phase.
 
-### Edit Phase 4: Assess Complexity
-
-Read the downloaded `.tsx` and the user's edit intent (`$ARGUMENTS`). Classify:
-
-**Simple** — all of the following are true:
-- Changes affect ≤ 2 properties, literals, or small styling adjustments
-- No new components, no new state, no new data sources
-- No restructural layout changes
-
-Examples: change a button color, update a label, fix a formula, adjust a padding value.
-
-**Complex** — any of the following are true:
-- New features (search, filter, sort, new sub-components)
-- New data sources or columns referenced
-- Restructural layout changes
-- Visual redesign
-
-Examples: add a search bar and column sorting, redesign the page layout, add a new
-data grid alongside existing content.
-
-- If **simple** → proceed to Edit Phase 5a.
-- If **complex** → proceed to Edit Phase 5b.
-
-### Edit Phase 5a: Simple — Direct Edit
-
-For simple edits, handle inline without dispatching agents:
-
-1. Read `${CLAUDE_PLUGIN_ROOT}/references/genpage-rules-reference.md` before editing.
-2. Briefly describe the proposed change to the user, get confirmation.
-3. Apply the change using the `Edit` tool on the downloaded `.tsx`.
-4. Proceed to Edit Phase 6 (deploy).
-
-### Edit Phase 5b: Complex — Plan and Edit via Agents
-
-For complex edits, orchestrate through specialist agents:
-
-#### 5b.1 — Invoke edit-planner
+### Edit Phase 4: Plan the Edit
 
 Invoke the `genpage-edit-planner` agent via the `Task` tool. Pass:
 
@@ -429,21 +401,31 @@ Invoke the `genpage-edit-planner` agent via the `Task` tool. Pass:
 - The working directory (absolute path)
 - The plugin root: `${CLAUDE_PLUGIN_ROOT}`
 - The app-id and page-id
-- The downloaded file path: `<working-dir>/<page-name>.tsx`
+- The download directory: `<working-dir>/<page-id>/`
 
-The planner writes `genpage-edit-plan.md` and returns a summary. Wait for it to finish.
+The planner reads `page.tsx`, `config.json`, and `prompt.txt` for context, gathers
+any clarification from the user, presents the edit plan via plan mode, and writes
+`<working-dir>/genpage-edit-plan.md` on approval. Wait for it to finish.
 
-#### 5b.2 — Invoke page-editor
+### Edit Phase 5: Apply the Edit
 
-Invoke the `genpage-page-editor` agent via the `Task` tool. Pass:
+Read `<working-dir>/genpage-edit-plan.md` for the approved change list and
+preservation constraints.
 
-- Target file path: `<working-dir>/<page-name>.tsx`
-- Edit plan path: `<working-dir>/genpage-edit-plan.md`
-- RuntimeTypes path: `<working-dir>/RuntimeTypes.ts` (if generated in Edit Phase 3)
-- Working directory (absolute path)
-- Plugin root: `${CLAUDE_PLUGIN_ROOT}`
+Also read:
+- `${CLAUDE_PLUGIN_ROOT}/references/genpage-rules-reference.md` — all code-gen
+  rules still apply to edits (Fluent UI V9 only, makeStyles with tokens, WCAG AA,
+  no `100vh`/`100vw`, etc.)
+- `<working-dir>/RuntimeTypes.ts` — if generated in Edit Phase 3, for verified
+  column names
+- `<working-dir>/<page-id>/page.tsx` — the current source
 
-The page-editor applies the changes in place and returns a summary. Wait for it to finish.
+Apply each change from the edit plan using targeted `Edit` operations on
+`<working-dir>/<page-id>/page.tsx`. **Preserve the functionality** listed under
+"Preservation Constraints" in the plan. Use ONLY verified column names from
+RuntimeTypes.ts when the edit touches data access.
+
+Do NOT rewrite the entire file. Use the minimum necessary `Edit` operations.
 
 ### Edit Phase 6: Deploy Updated Page
 
@@ -451,7 +433,7 @@ The page-editor applies the changes in place and returns a summary. Wait for it 
 pac model genpage upload `
   --app-id <app-id> `
   --page-id <page-id> `
-  --code-file <working-dir>/<page-name>.tsx `
+  --code-file <working-dir>/<page-id>/page.tsx `
   --data-sources "entity1,entity2" `
   --prompt "User's edit request summary" `
   --model "<current-model-id>" `
@@ -459,7 +441,7 @@ pac model genpage upload `
 ```
 
 Use `--page-id` for updates. Omit `--add-to-sitemap` (the page is already in the sitemap).
-Omit `--data-sources` for mock-data pages.
+Omit `--data-sources` when `config.json.dataSources` was empty.
 
 ### Edit Phase 7: Verify (Optional)
 
@@ -475,9 +457,9 @@ Then present a summary to the user:
 ```
 ## Edit Complete
 
-| File | Complexity | Changes | Status |
-|------|------------|---------|--------|
-| [filename].tsx | Simple / Complex | [N changes] | Deployed |
+| File | Changes | Status |
+|------|---------|--------|
+| <page-id>/page.tsx | <N changes> | Deployed |
 
 App: [app name] ([app-id])
 Page ID: [page-id]

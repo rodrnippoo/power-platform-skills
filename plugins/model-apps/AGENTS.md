@@ -27,8 +27,7 @@ agents/                        ← Agent definitions (invoked by skills via Task
   genpage-planner.md           ← Requirements, discovery, plan doc, user approval (create flow)
   genpage-entity-builder.md    ← DV entity creation via Dataverse plugin (create flow)
   genpage-page-builder.md      ← Writes one .tsx file; runs in parallel for multi-page (create flow)
-  genpage-edit-planner.md      ← Analyzes existing page, plans complex edits (edit flow)
-  genpage-page-editor.md       ← Applies planned edits to existing .tsx in place (edit flow)
+  genpage-edit-planner.md      ← Reads download artifacts, plans edits, writes edit plan (edit flow)
 references/                    ← Shared reference docs
   genpage-rules-reference.md   ← Full code-gen rules, DataAPI types, layout patterns, common errors
   genpage-plan-schema.md       ← Schema contract for genpage-plan.md
@@ -56,8 +55,7 @@ Agents are invoked by skills via the `Task` tool — they are not user-invocable
 | `genpage-planner` | `genpage` (create flow) | Validates prereqs, gathers requirements, detects entity/app existence, presents plan for approval, writes `genpage-plan.md` |
 | `genpage-entity-builder` | `genpage` (create flow) | Creates Dataverse tables, columns, relationships, choices, and sample data using the Dataverse Skills plugin (soft dependency) |
 | `genpage-page-builder` | `genpage` (create flow) | Generates one complete `.tsx` page from the plan and schema; runs in parallel with other builders for multi-page requests |
-| `genpage-edit-planner` | `genpage` (edit flow, complex) | Analyzes an existing page, gathers change requirements, presents edit plan, writes `genpage-edit-plan.md` |
-| `genpage-page-editor` | `genpage` (edit flow, complex) | Applies planned edits to the existing `.tsx` in place while preserving existing functionality |
+| `genpage-edit-planner` | `genpage` (edit flow) | Reads the downloaded page artifacts (page.tsx, config.json, prompt.txt), gathers change requirements, presents edit plan, writes `genpage-edit-plan.md`. The orchestrator applies the edit inline. |
 
 ## Key Concepts
 
