@@ -190,9 +190,37 @@ Immediately after the dev server starts, verify the scaffold is working:
    >
    > Always generate options that make sense for the specific site — never reuse a fixed list.
 
-2. Read the design aesthetics reference: `${CLAUDE_PLUGIN_ROOT}/skills/create-site/references/design-aesthetics.md`
-3. **Map aesthetic + mood to design choices** using the Aesthetic x Mood Mapping table from the design reference. Record the chosen font direction, color direction, and motion direction.
-4. Analyze requirements and determine needed components. Present component plan to user as a table:
+2. **AI Component Planning** — Based on Phase 1 answers (site name, purpose, audience) and the feature selection above, propose which of the Power Pages generative-AI summarization APIs the site might use. Use `AskUserQuestion` with multi-select to let the user opt in:
+
+   | Question | Header | Options |
+   |----------|--------|---------|
+   | Which AI summarization features should the site have? (multi-select — each can be added later with `/add-ai-webapi`) | AI Summaries | *(generate 2-4 context-aware options plus "None for now")* |
+
+   > **Options are NOT hardcoded.** Infer relevant AI summary features from Phase 1 and the features picked above. Examples:
+   > - "HR Dashboard" + Leave Requests feature → "Data summarization for leave requests", "Search summary on the knowledge base"
+   > - "Contoso Portal" + Knowledge Base → "Search summary on site-wide search", "Data summarization for articles"
+   > - "Customer Self-Service" + Support Cases / Incidents → "Case-page Copilot preset (case summary)", "Data summarization for attached knowledge articles"
+   >
+   > Always include the **Case-page Copilot preset** as a suggested option when the site handles `incident` / case / ticket data. Always include **None for now** so the user can defer. Do NOT integrate the APIs in this skill — only record the user's picks so Phase 4's plan can mention them and Phase 8 can suggest `/add-ai-webapi` as a recommended next step.
+   >
+   > Capture the selection in memory as `AI_SUMMARY_PICKS` — a list of one or more of: `search-summary`, `data-summarization`, `case-preset`.
+
+3. **Map picks to target pages.** For each entry in `AI_SUMMARY_PICKS`, decide which page will carry the AI surface and store the mapping as `AI_SUMMARY_PLACEMENTS`. This is what Phase 4 shows the user and what Phase 5 reserves slots for. Use the feature selection from step 1 — and treat this mapping as an *input* to the page list Claude proposes in step 6: if a pick has no natural target page, add one to the plan so the summary has a home:
+
+   | Pick | Default target page | If no matching page is planned |
+   |------|--------------------|-------------------------------|
+   | `search-summary` | A search / search-results page (e.g., `SearchResults`, `Search`) | Add a search page to the plan so the summary has a home |
+   | `data-summarization` | The detail page of the table the user called out (e.g., `ProductDetail` for products) — ask the user if ambiguous | Propose adding a detail page; if rejected, fall back to a list/dashboard page |
+   | `case-preset` | `CaseDetail` / `IncidentDetail` / `TicketDetail` (whichever matches the site's terminology) | Propose adding a case detail page to the plan |
+
+   `AI_SUMMARY_PLACEMENTS` shape: one record per placement, e.g.
+   `[{ pick: "case-preset", targetPage: "CaseDetail", marker: "POWERPAGES:AI-SLOT kind=case-preset" }]`.
+
+   The `marker` string is the comment tag Phase 5 emits into the page source as a reserved anchor that `/add-ai-webapi` later finds. Keep the shape uniform — one marker per placement, always the same tag, so the follow-up skill's explore step can grep for them deterministically.
+
+4. Read the design aesthetics reference: `${CLAUDE_PLUGIN_ROOT}/skills/create-site/references/design-aesthetics.md`
+5. **Map aesthetic + mood to design choices** using the Aesthetic x Mood Mapping table from the design reference. Record the chosen font direction, color direction, and motion direction.
+6. Analyze requirements and determine needed components. If `AI_SUMMARY_PLACEMENTS` from step 3 implies a page that wasn't already in the plan (e.g., a `CaseDetail` page for `case-preset`), add it to the page list now. Present the component plan to the user as a table:
 
    ```
    | Component Type      | Count | Details |
@@ -203,7 +231,7 @@ Immediately after the dev server starts, verify the scaffold is working:
    | Routes              | 4     | /, /about, /services, /contact |
    ```
 
-5. Use best judgement to determine the final color palette based on the chosen aesthetic + mood. These will be written fresh into a new `theme.css` during Implementation (Phase 5) when the scaffold loading screen is completely replaced:
+7. Use best judgement to determine the final color palette based on the chosen aesthetic + mood. These will be written fresh into a new `theme.css` during Implementation (Phase 5) when the scaffold loading screen is completely replaced:
 
    | CSS Variable | Description | Value |
    |-------------|-------------|-------|
@@ -236,6 +264,12 @@ Immediately after the dev server starts, verify the scaffold is working:
      - Color palette: full CSS variable set with hex values (replacing the scaffold defaults)
      - Motion/animation plan: page load, hover states, transitions
      - Background treatment: gradients, patterns, effects
+   - **AI Readiness** (only include this sub-section if `AI_SUMMARY_PLACEMENTS` from Phase 3 is non-empty — otherwise omit it entirely, no dead heading):
+     - For each placement, one bullet: *"<Target page> will have a reserved slot for <pick name, human-readable> — the page ships without AI; running `/add-ai-webapi` later populates the slot."*
+     - Example bullets for a site with `case-preset` and `search-summary` picks:
+       - *Case detail page will have a reserved slot for the Copilot case summary card — the page ships without AI; running `/add-ai-webapi` later populates the slot.*
+       - *Search results page will have a reserved slot for the AI search summary — the page ships without AI; running `/add-ai-webapi` later populates the slot.*
+     - This sets the user's expectation honestly: the site does not depend on generative-AI features being enabled on the tenant, and there is no "Run /add-ai-webapi" placeholder visible to end-users.
 
    **Section B — Review & Deployment**
    - What to verify before handoff
@@ -289,6 +323,24 @@ The scaffold is a temporary loading screen — it must be **completely replaced*
 5. **Router** — Register all new routes (the scaffold only has `/` and `/about` — add all requested routes)
 6. **Navigation** — Add links to the new Layout/Header component
 7. **Entry HTML** — Update `index.html` (or `Layout.astro` for Astro) to load the chosen Google Fonts instead of the scaffold's DM Sans + Outfit
+8. **Reserve AI summary slots** — only if `AI_SUMMARY_PLACEMENTS` from Phase 3 is non-empty. For each placement, insert a single comment marker in the target page source at the intended insertion point. No visible placeholder UI, no stub components, no extra routes — just a grep-able anchor that `/add-ai-webapi` will later find and replace. Syntax depends on the framework:
+
+   | Framework | Marker syntax |
+   |-----------|--------------|
+   | React (JSX) | `{/* POWERPAGES:AI-SLOT kind=<pick> */}` inside the component's return JSX |
+   | Vue (SFC template) | `<!-- POWERPAGES:AI-SLOT kind=<pick> -->` inside `<template>` |
+   | Angular (HTML template) | `<!-- POWERPAGES:AI-SLOT kind=<pick> -->` inside the component template |
+   | Astro | `<!-- POWERPAGES:AI-SLOT kind=<pick> -->` inside the component's HTML |
+
+   Where `<pick>` is one of `search-summary`, `data-summarization`, `case-preset` — verbatim from the placement record.
+
+   Placement within the page:
+
+   - **`case-preset`** / **`data-summarization`** (record detail): directly after the page heading, above the detail content — this is where a Copilot summary card naturally reads in the reading order.
+   - **`data-summarization`** (list page): directly above the list / table, below the page heading and any filter bar.
+   - **`search-summary`**: directly above the search-results list, below the search input — the summary paragraph reads before the keyword hits.
+
+   One marker per placement, exactly as defined in the `marker` field of the `AI_SUMMARY_PLACEMENTS` record. Do NOT add stub components (`<CopilotSummaryCard />`, etc.), CSS classes, or empty `<aside>` elements — the slot is just a comment. The site must ship as if AI is not a consideration; the follow-up skill does the real work.
 
 **Important**: Build real, functional UI with distinctive design applied — not placeholder "coming soon" pages, and not generic unstyled markup. Every page and component should reflect the chosen aesthetic from the moment it's created. The scaffold loading screen should be completely gone after this phase — no trace of the Power Pages branded animation should remain.
 
@@ -486,6 +538,7 @@ Present a summary table to the user:
    - `/setup-datamodel` — Create Dataverse tables for dynamic content
    - `/add-seo` — Add meta tags, robots.txt, sitemap.xml, favicon
    - `/add-tests` — Add unit tests (Vitest) and E2E tests (Playwright)
+   - `/add-ai-webapi` — Add generative-AI summaries (search summary, data summarization, Copilot case preset). **Recommend first when `AI_SUMMARY_PLACEMENTS` from Phase 3 is non-empty** — the pages already carry `POWERPAGES:AI-SLOT` comment markers at the intended insertion points, so the follow-up skill's explore step finds them deterministically and the user gets the AI surface they picked during discovery without any page redesign.
 
 **Output**: Deployed (or deployment-ready) site with clear next steps
 

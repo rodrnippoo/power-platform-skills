@@ -19,6 +19,7 @@ test('detectTrackedSkill recognizes slash command aliases without plugin prefix'
   assert.equal(detectTrackedSkill('/setup-auth'), 'setup-auth');
   assert.equal(detectTrackedSkill('/add-server-logic'), 'add-server-logic');
   assert.equal(detectTrackedSkill('/add-cloud-flow'), 'add-cloud-flow');
+  assert.equal(detectTrackedSkill('/add-ai-webapi'), 'add-ai-webapi');
   assert.equal(detectTrackedSkill('/integrate-webapi'), 'integrate-webapi');
   assert.equal(detectTrackedSkill('/audit-permissions'), 'audit-permissions');
   assert.equal(detectTrackedSkill('/deploy-site'), null);
@@ -41,6 +42,7 @@ test('getTrackedSkillFromToolInput finds a tracked skill in common fields', () =
 test('getValidatorScript returns validator paths only for command-backed skills', () => {
   assert.match(getValidatorScript('create-site'), /validate-site\.js$/);
   assert.match(getValidatorScript('add-server-logic'), /validate-serverlogic\.js$/);
+  assert.match(getValidatorScript('add-ai-webapi'), /validate-ai-webapi\.js$/);
   assert.equal(getValidatorScript('test-site'), null);
   assert.equal(getValidatorScript('missing-skill'), null);
 });
