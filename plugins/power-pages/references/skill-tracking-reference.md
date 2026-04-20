@@ -20,6 +20,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/update-skill-tracking.js" --projectRoot "<PR
 
 The script exits silently if `.powerpages-site/site-settings/` does not exist, so it is safe to call unconditionally.
 
+If the tracking script creates or updates site setting YAML files, include those tracking changes in the next git commit for the current phase or final summary commit.
+
 ## Skill Name Mapping
 
 | Skill | PascalCase (`--skillName`) | Setting Name |
@@ -36,6 +38,9 @@ The script exits silently if `.powerpages-site/site-settings/` does not exist, s
 | test-site | TestSite | Site/AI/Skills/TestSite |
 | audit-permissions | AuditPermissions | Site/AI/Skills/AuditPermissions |
 | plan-alm | PlanAlm | Site/AI/Skills/PlanAlm |
+| add-server-logic | AddServerLogic | Site/AI/Skills/AddServerLogic |
+| add-cloud-flow | AddCloudFlow | Site/AI/Skills/AddCloudFlow |
+| integrate-backend | IntegrateBackend | Site/AI/Skills/IntegrateBackend |
 
 ## YAML Format
 
