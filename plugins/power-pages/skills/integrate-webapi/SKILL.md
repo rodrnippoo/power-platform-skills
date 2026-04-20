@@ -53,7 +53,7 @@ Integrate Power Pages Web API into a code site's frontend. This skill orchestrat
 
 ### 1.1 Locate Project
 
-Look for `powerpages.config.json` in the current directory or immediate subdirectories to find the project root. Use your file-search tool (e.g., `Glob` with pattern `**/powerpages.config.json` at depth 1) rather than a shell-specific command.
+Look for `powerpages.config.json` in the current directory or immediate subdirectories to find the project root. Use your file-search tool (e.g., `Glob` with patterns `powerpages.config.json` and `*/powerpages.config.json`) rather than a shell-specific command.
 
 **If not found**: Tell the user to create a site first with `/create-site`.
 
