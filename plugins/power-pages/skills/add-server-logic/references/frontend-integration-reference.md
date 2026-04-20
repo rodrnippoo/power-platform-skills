@@ -76,7 +76,9 @@ const records = body.value;                 // the actual array
 
 For `RetrieveRecord`, `body` is the single record object (no `value` array). For `CreateRecord`, the new record's GUID is returned in the HTTP response header `entityid` — read it with `xhr.getResponseHeader('entityid')` (jQuery/safeAjax) or `response.headers.get('entityid')` (fetch).
 
-### Two approaches — pick one and apply it consistently
+### Three approaches — pick one and apply it consistently
+
+For Dataverse-backed server logic there are three valid response shapes: **raw passthrough** (return the connector result as-is and parse it twice on the client), **server envelope that still wraps the connector result** (preserve the connector metadata but add an outer status wrapper), and **fully normalized** (unwrap everything server-side and return only what the UI needs). Pick one shape for each endpoint and apply it consistently across the server logic and the frontend integration.
 
 **Approach A — Return the raw Dataverse response, double-parse on the client**
 
@@ -126,7 +128,44 @@ success: (res, status, xhr) => {
 }
 ```
 
-**Approach B — Unwrap server-side and return a clean shape (recommended for most new code)**
+**Approach B — Server envelope that still wraps the connector result**
+
+Use this when you want to add a stable top-level wrapper (e.g. `{ status, data }`) to every response but keep the raw connector result inside so generic handling code can read `Body`/`StatusCode`/`Headers` if needed.
+
+Server logic:
+
+```javascript
+function get() {
+    try {
+        Server.Logger.Log("GET called");
+        const entitySetName = Server.Context.QueryParameters["entitySetName"];
+        const result = Server.Connector.Dataverse.RetrieveMultipleRecords(entitySetName);
+        return JSON.stringify({ status: "success", data: result });
+    } catch (err) {
+        Server.Logger.Error("GET failed: " + err.message);
+        return JSON.stringify({ status: "error", message: err.message });
+    }
+}
+```
+
+Client — note the extra `data` layer before reaching `Body`:
+
+```typescript
+const envelope = await powerPagesFetch<{ data: string; success: boolean; error: string | null }>(
+    '/_api/serverlogics/contacts-crud',
+    { method: 'GET' }
+);
+if (!envelope) throw new Error('Empty response from contacts-crud');
+if (!envelope.success) throw new Error(envelope.error ?? 'Failed');
+const payload = JSON.parse(envelope.data) as { status: string; data: { Body: string; StatusCode: number; Headers: Record<string, string> } };
+const outer   = payload.data;                 // connector result still wrapped here
+const body    = JSON.parse(outer.Body);       // { "@odata.context": "...", value: [...] }
+const records = body.value;
+```
+
+Do **not** use the Approach A parsing path (`JSON.parse(envelope.data) → JSON.parse(outer.Body)`) against this shape — that skips the `payload.data` unwrap and reads `Body` off the wrong object.
+
+**Approach C — Unwrap server-side and return a clean shape (recommended for most new code)**
 
 Return a stable, documented shape from the function. Client code then only unwraps the outer envelope and parses `data` once. Prefer this when the server logic serves a specific feature (not a generic CRUD passthrough).
 
@@ -163,6 +202,7 @@ const envelope = await powerPagesFetch<{ data: string; success: boolean; error: 
     '/_api/serverlogics/getContacts',
     { method: 'GET' }
 );
+if (!envelope) throw new Error('Empty response from getContacts');
 if (!envelope.success) throw new Error(envelope.error ?? 'Failed');
 const payload = JSON.parse(envelope.data) as { status: string; contacts: Contact[] };
 return payload.contacts;

@@ -323,7 +323,7 @@ For each captured API request, evaluate:
 
 #### 5.3b Inspect Server Logic Response Shapes
 
-Server logic endpoints (`/_api/serverlogics/<name>`) return a standard envelope whose `data` field is a string. When the server logic returns serialized JSON (common), `data` must be parsed to reveal the actual payload — and that payload itself may be nested further. Frontend code often parses to the wrong level, reads the wrong keys, or treats `data` as the final object, producing silent UI failures. Test-site must surface the exact observed shape so the frontend can be corrected.
+Server logic endpoints (`/_api/serverlogics/<name>`) commonly return a standard envelope whose `data` field is typically a string on success, but it is not guaranteed to be one in every response — in failure or edge cases `data` may be `null`, absent, a non-JSON string, or another non-string value. When the server logic returns serialized JSON (common), `data` must be parsed to reveal the actual payload — and that payload itself may be nested further. Frontend code often parses to the wrong level, reads the wrong keys, or treats `data` as the final object, producing silent UI failures. Test-site must surface the exact observed shape so the frontend can be corrected rather than assuming `data` is always directly parseable.
 
 For each `/_api/serverlogics/` request observed on any tested page:
 
@@ -338,7 +338,7 @@ For each `/_api/serverlogics/` request observed on any tested page:
       const levels = [];
       let current;
       try { current = JSON.parse(text); } catch { return { status, rawSample: text.slice(0, 2000) }; }
-      levels.push({ type: Array.isArray(current) ? 'array' : typeof current, keys: current && typeof current === 'object' ? Object.keys(current) : null });
+      levels.push({ type: Array.isArray(current) ? 'array' : typeof current, keys: current && typeof current === 'object' && !Array.isArray(current) ? Object.keys(current) : null, firstItemKeys: Array.isArray(current) && current[0] && typeof current[0] === 'object' ? Object.keys(current[0]) : null });
       // Progressively parse common nested-string fields (data, Body, body, payload, result)
       const nestedKeys = ['data', 'Body', 'body', 'payload', 'result'];
       while (current && typeof current === 'object') {
