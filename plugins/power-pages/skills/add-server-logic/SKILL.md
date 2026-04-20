@@ -664,17 +664,9 @@ function get() {
 
 #### Dataverse Response Shape (Critical for Frontend Integration)
 
-When a function returns the result of a `Server.Connector.Dataverse.*` method directly, the client receives a **double-wrapped** payload: the server logic envelope's `data` is a JSON string that parses to `{ Body: "<JSON string>", StatusCode, Headers }`, and `Body` must be parsed again to reach the actual Dataverse records. `CreateRecord` returns the new record GUID only through the `entityid` HTTP response header — it is not in the body. This is the most common cause of broken frontend integrations.
+When a function returns the result of a `Server.Connector.Dataverse.*` method, the client sees a double-wrapped payload — the most common cause of broken frontend integrations. Before writing the function, pick one of three response shapes and record the choice for Phase 9: **Approach A — raw passthrough** (return the connector result as-is), **Approach B — envelope that wraps the connector result** (return `{ status, data: result }` without unwrapping `Body`), or **Approach C — fully normalized** (parse `Body` server-side and return a feature-specific shape — recommended for non-generic endpoints).
 
-Reference: <https://learn.microsoft.com/en-us/power-pages/configure/server-logic-operations>
-
-For each Dataverse-backed function, decide which response shape you are returning and document it explicitly for Phase 9:
-
-1. **Raw passthrough** — Return the Dataverse connector result directly. Matches the Microsoft Learn CRUD sample. `JSON.parse(envelope.data)` yields the connector result object itself: `{ Body, StatusCode, Headers }`. The client must then parse `Body` to reach the actual Dataverse payload (`JSON.parse(envelope.data)` → `JSON.parse(outer.Body)`). Use this only for generic CRUD endpoints driven by `entitySetName` query parameters.
-2. **Server envelope that still wraps the connector result** — Return something like `JSON.stringify({ status: "success", data: result })` where `result` is the unmodified connector output. `JSON.parse(envelope.data)` yields `{ status, data }`, and `data` is the connector result object. The client must unwrap that extra `data` layer before reading/parsing `Body` (e.g. `const payload = JSON.parse(envelope.data); const outer = payload.data; const body = JSON.parse(outer.Body);`). Do **not** apply the raw-passthrough parsing path against this wrapped shape.
-3. **Fully normalized server-shaped response (recommended)** — Parse `dvResponse.Body` inside the server logic, project the fields the UI actually needs, and return a feature-specific shape via `JSON.stringify({ status, ... })` that does **not** expose the connector's `{ Body, StatusCode, Headers }` wrapper. The client parses `envelope.data` once and gets a stable shape. Use this for any endpoint that backs a specific feature.
-
-Record the chosen approach for each server logic item so Phase 9 can wire the frontend against the correct shape. Specifically note whether the frontend should expect (a) the connector output directly at `JSON.parse(envelope.data)`, (b) a server envelope whose `data` property still contains the connector output, or (c) a fully normalized feature payload. All three shapes — with server-side and client-side examples — are documented in `${CLAUDE_PLUGIN_ROOT}/skills/add-server-logic/references/frontend-integration-reference.md` under "Dataverse Connector Response Format" → "Three approaches".
+See `${CLAUDE_PLUGIN_ROOT}/skills/add-server-logic/references/frontend-integration-reference.md` → "Dataverse Connector Response Format" for the double-wrapping explanation, the `CreateRecord` / `entityid` header behavior, and server- and client-side examples for each shape.
 
 #### Referencing Secrets in Code
 
@@ -1057,7 +1049,7 @@ Following the reference:
 - Replace placeholder data, mock handlers, or temporary actions when they are meant to be backed by the new server logic endpoints
 - Add or preserve loading, success, empty, and error states so the UI behaves like a finished feature
 - **For validate-and-execute endpoints**: The frontend must call the server logic endpoint for the protected operation (e.g., status transition) — it must NOT make a separate Web API PATCH for the same field. Ensure the UI for that operation (e.g., a "Submit" or "Approve" button) calls the server logic service function, not the Web API service
-- **For Dataverse-backed endpoints**: Match the frontend parsing to the approach chosen in Phase 5.3. If the server logic returns the raw `Server.Connector.Dataverse.*` result, the client must double-parse — `JSON.parse(envelope.data)` to get the outer object, then `JSON.parse(outer.Body)` to reach the records (use `.value` for `RetrieveMultipleRecords`). For `CreateRecord` the new id is in the `entityid` response header, not the body. If the server logic already unwrapped `Body` and returned a feature-specific shape, the client only needs `JSON.parse(envelope.data)` once. See "Dataverse Connector Response Format" in the frontend integration reference.
+- **For Dataverse-backed endpoints**: Match the frontend parsing to the response shape chosen in Phase 5.3. See "Dataverse Connector Response Format" in the frontend integration reference for the exact parsing per shape.
 - **If the response shape is unclear**: Do not guess. After the site is deployed, invoke `/test-site` against the live site so the actual server logic response can be captured from the network tab and used to drive the integration
 
 ### 9.4 Git Commit
