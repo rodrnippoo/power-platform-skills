@@ -226,7 +226,7 @@ If the frontend integration is failing because the exact Dataverse response shap
 - When the server logic returns that object directly, the client must `JSON.parse(res.data)` to get the outer object and `JSON.parse(outer.Body)` to get the Dataverse payload.
 - `RetrieveMultipleRecords` payloads have a `value` array; `RetrieveRecord` payloads are a single record object.
 - `CreateRecord` returns the new record id via the `entityid` HTTP response header — not in the body.
-- For non-trivial features, prefer unwrapping `Body` inside the server logic and returning a feature-specific shape (Approach B) so the client integration is obvious and stable.
+- For non-trivial features, prefer unwrapping `Body` inside the server logic and returning a feature-specific shape (Approach C) so the client integration is obvious and stable.
 
 ## Recommended Approaches
 
