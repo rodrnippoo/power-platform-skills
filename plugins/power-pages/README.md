@@ -216,15 +216,14 @@ claude --dangerously-skip-permissions
 
 Run the validator unit tests with Node's built-in test runner:
 
-```powershell
-$files = Get-ChildItem .\plugins\power-pages\scripts\tests\*.test.js | ForEach-Object { $_.FullName }
-node --test $files
+```bash
+node --test plugins/power-pages/scripts/tests/
 ```
 
 To validate table-permission relationship names against live Dataverse metadata during local testing, run:
 
-```powershell
-node .\plugins\power-pages\scripts\validate-permissions-schema.js --projectRoot C:\path\to\site --validate-dataverse-relationships --envUrl https://your-org.crm.dynamics.com
+```bash
+node plugins/power-pages/scripts/validate-permissions-schema.js --projectRoot /path/to/site --validate-dataverse-relationships --envUrl https://your-org.crm.dynamics.com
 ```
 
 This Dataverse relationship check is intended for local validation only and should not be used in CI.

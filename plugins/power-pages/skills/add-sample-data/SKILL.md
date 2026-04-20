@@ -32,7 +32,7 @@ Populate Dataverse tables with sample records via OData API so users can test an
 **Actions**:
 
 1. Create todo list with all 6 phases (see [Progress Tracking](#progress-tracking) table)
-2. Follow the prerequisite steps in `${CLAUDE_PLUGIN_ROOT}/references/dataverse-prerequisites.md` to verify PAC CLI auth, acquire an Azure CLI token, and confirm API access. Store the environment URL as `$envUrl`.
+2. Follow the prerequisite steps in `${CLAUDE_PLUGIN_ROOT}/references/dataverse-prerequisites.md` to verify PAC CLI auth, acquire an Azure CLI token, and confirm API access. Note the environment URL as `<envUrl>` for subsequent script calls.
 
 **Output**: Authenticated session with valid token and confirmed API access
 
@@ -48,7 +48,7 @@ Populate Dataverse tables with sample records via OData API so users can test an
 
 Check if `.datamodel-manifest.json` exists in the project root (written by the `setup-datamodel` skill). If it exists, read it -- it already contains table logical names, display names, and column info.
 
-```powershell
+```bash
 # Check if manifest exists
 Test-Path ".datamodel-manifest.json"
 ```

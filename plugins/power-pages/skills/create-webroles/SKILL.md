@@ -50,7 +50,7 @@ Create web roles for a Power Pages code site. Web roles define the permissions a
 
 3. **If `.powerpages-site` exists but `web-roles/` does NOT:** Create it:
 
-   ```powershell
+   ```bash
    New-Item -ItemType Directory -Path "<PROJECT_ROOT>/.powerpages-site/web-roles" -Force
    ```
 
@@ -133,7 +133,7 @@ For each new web role the user approved, create a YAML file in `.powerpages-site
 
 For each role, generate a UUID using the Node script. **NEVER generate UUIDs yourself — always use the script.**
 
-```powershell
+```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/generate-uuid.js"
 ```
 

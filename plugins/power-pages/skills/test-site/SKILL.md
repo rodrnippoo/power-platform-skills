@@ -58,7 +58,7 @@ If no URL was provided, attempt auto-detection:
 
 2. Run the activation status check script:
 
-   ```powershell
+   ```bash
    node "${CLAUDE_PLUGIN_ROOT}/scripts/check-activation-status.js" --projectRoot "<PROJECT_ROOT>"
    ```
 
