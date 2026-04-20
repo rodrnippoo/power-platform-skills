@@ -672,12 +672,13 @@ When a function returns the result of a `Server.Connector.Dataverse.*` method di
 
 Reference: <https://learn.microsoft.com/en-us/power-pages/configure/server-logic-operations>
 
-For each Dataverse-backed function, decide between:
+For each Dataverse-backed function, decide which response shape you are returning and document it explicitly for Phase 9:
 
-1. **Raw passthrough** — Return the Dataverse connector result directly. Matches the Microsoft Learn CRUD sample. The client must double-parse (`JSON.parse(envelope.data)` → `JSON.parse(outer.Body)`). Use this only for generic CRUD endpoints driven by `entitySetName` query parameters.
-2. **Server-shaped response (recommended)** — Parse `dvResponse.Body` inside the server logic, project the fields the UI actually needs, and return a feature-specific shape via `JSON.stringify({ status, ... })`. The client then parses `envelope.data` once and gets a stable shape. Use this for any endpoint that backs a specific feature.
+1. **Raw passthrough** — Return the Dataverse connector result directly. Matches the Microsoft Learn CRUD sample. `JSON.parse(envelope.data)` yields the connector result object itself: `{ Body, StatusCode, Headers }`. The client must then parse `Body` to reach the actual Dataverse payload (`JSON.parse(envelope.data)` → `JSON.parse(outer.Body)`). Use this only for generic CRUD endpoints driven by `entitySetName` query parameters.
+2. **Server envelope that still wraps the connector result** — Return something like `JSON.stringify({ status: "success", data: result })` where `result` is the unmodified connector output. `JSON.parse(envelope.data)` yields `{ status, data }`, and `data` is the connector result object. The client must unwrap that extra `data` layer before reading/parsing `Body` (e.g. `const payload = JSON.parse(envelope.data); const outer = payload.data; const body = JSON.parse(outer.Body);`). Do **not** apply the raw-passthrough parsing path against this wrapped shape.
+3. **Fully normalized server-shaped response (recommended)** — Parse `dvResponse.Body` inside the server logic, project the fields the UI actually needs, and return a feature-specific shape via `JSON.stringify({ status, ... })` that does **not** expose the connector's `{ Body, StatusCode, Headers }` wrapper. The client parses `envelope.data` once and gets a stable shape. Use this for any endpoint that backs a specific feature.
 
-Record the chosen approach for each server logic item so Phase 9 can wire the frontend against the correct shape. The full shape details, examples, and both client-side parsing patterns are in `${CLAUDE_PLUGIN_ROOT}/skills/add-server-logic/references/frontend-integration-reference.md` under "Dataverse Connector Response Format".
+Record the chosen approach for each server logic item so Phase 9 can wire the frontend against the correct shape. Specifically note whether the frontend should expect (a) the connector output directly at `JSON.parse(envelope.data)`, (b) a server envelope whose `data` property still contains the connector output, or (c) a fully normalized feature payload. Full shape details, examples, and client-side parsing patterns are in `${CLAUDE_PLUGIN_ROOT}/skills/add-server-logic/references/frontend-integration-reference.md` under "Dataverse Connector Response Format".
 
 #### Referencing Secrets in Code
 

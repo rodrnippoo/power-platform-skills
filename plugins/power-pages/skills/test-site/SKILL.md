@@ -24,7 +24,7 @@ Test a deployed, activated Power Pages site at runtime. Navigate the site in a b
 
 - **Non-destructive**: This skill is read-only — it does not create, modify, or delete any files or data. It only observes the site via the browser.
 - **API-first testing**: The primary goal beyond page loads is verifying that all `/_api/` (Web API / OData) requests return successful responses.
-- **Response-shape discovery**: For `/_api/serverlogics/` endpoints the test run must also capture and report the actual response body shape so frontend integrations can be written against the real response, not a guessed one. Fix the frontend when its parsing or field access does not match the observed shape.
+- **Response-shape discovery**: For `/_api/serverlogics/` endpoints the test run must also capture and report the actual response body shape so frontend integrations can be written against the real response, not a guessed one. If frontend parsing or field access does not match the observed shape, report the mismatch and describe the parsing or field-access changes needed — this skill does not modify any code.
 - **User-controlled authentication**: Never attempt to log in automatically. Always ask the user to log in via the browser window when authentication is required.
 - **Bounded crawling**: Cap page crawling at 25 pages to prevent infinite loops on sites with dynamic or paginated URLs.
 
@@ -357,9 +357,9 @@ For each `/_api/serverlogics/` request observed on any tested page:
 
 3. For non-GET server logic requests, do **not** re-execute them (they may mutate data). Rely on the already-captured `browser_network_requests` entry and report whatever response metadata is available. Note in the report that the body was not re-captured.
 4. Build a "Server Logic Response Shapes" section for the Phase 6 report. For each endpoint record: endpoint name, HTTP method, status, the chain of parse levels (what key was parsed at each step, resulting type, keys at that level, and first-item keys when the level is an array), and a short raw sample (first ~500 chars). If `envelope.success === false` and `envelope.error` is present, report the error verbatim.
-5. Compare the observed shape to how the frontend actually consumes it (service files, hooks, components found in the repo). If there is a mismatch — e.g. the UI reads `envelope.data.value` as an object but the actual payload is a string that needs parsing, or expects a field name that doesn't appear in the observed keys — fix the frontend to match the real shape. Keep the fix minimal: correct the parsing or field access, do not refactor unrelated code. Commit the fix after the test report is generated.
+5. Compare the observed shape to how the frontend actually consumes it (service files, hooks, components found in the repo). If there is a mismatch — e.g. the UI reads `envelope.data.value` as an object but the actual payload is a string that needs parsing, or expects a field name that doesn't appear in the observed keys — identify the mismatch and recommend the minimal frontend change needed to match the real shape. Be specific about the parsing or field access change required, but do **not** modify frontend code or create a commit in this skill; leave implementation to a separate editing/remediation skill or phase.
 
-Record the findings (and any frontend fixes applied) for the Phase 6 report.
+Record the findings and any recommended frontend fixes for the Phase 6 report.
 
 #### 5.4 Provide Actionable Guidance for Failures
 
@@ -504,15 +504,15 @@ If any `/_api/serverlogics/` requests were captured in Phase 5.3b, add a dedicat
 
 - Level 0 (raw body): object, keys: [requestId, success, serverLogicName, data, error]
 - Level 1 (parsed from `data`): object, keys: [status, items, count]
-- Level 2 (parsed from `items` — array): first item keys: [id, name, ...]
-- Raw sample: `{"requestId":"...","success":true,"data":"{\"status\":\"success\",\"items\":[{...}]}", ...}`
+- Level 1 `items` property: array; first item keys: [id, name, ...]
+- Raw sample: `{"requestId":"...","success":true,"data":"{\"status\":\"success\",\"items\":[{\"id\":\"...\",\"name\":\"...\"}],\"count\":1}", ...}`
 
 Frontend parsing required:
     const level1 = JSON.parse(envelope.data);
     const items  = level1.items;
 ```
 
-If a frontend mismatch was detected and fixed, list the files that were changed and the specific parsing/field access that was corrected. This section is the primary deliverable when a developer asks "I don't know what shape my server logic returns — what does the frontend need to do?"
+If a frontend mismatch was detected, list the files and lines that would need to change and the specific parsing/field access correction required — do not apply or commit the change in this skill. This section is the primary deliverable when a developer asks "I don't know what shape my server logic returns — what does the frontend need to do?"
 
 #### 6.4 Present Authenticated Test Results (If Applicable)
 
