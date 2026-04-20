@@ -66,8 +66,18 @@ Steps:
    - Options: **"Use pre-loaded choices from plan"** / **"Re-discover and re-classify"**
    - If user chooses pre-loaded: read `.alm-plan-context.json`, store the `siteSettings` object as `preloadedSettings`. When Step 5.3 is reached, **skip the query and classification logic** — use `preloadedSettings` directly.
    - If user chooses re-discover: proceed normally (Steps 5.3–5.4 query Dataverse and reclassify).
+6. **Detect sync mode** — check whether `.solution-manifest.json` exists in the project root.
+   - **If present**: read it and verify the `solutionId` still exists in the target environment via `GET {envUrl}/api/data/v9.2/solutions({solutionId})?$select=solutionid,uniquename,version,ismanaged`.
+     - If the solution is still present and unmanaged in this environment: set `syncMode = true` and store `existingSolution` = the manifest contents.
+     - If the solution was not found, is managed, or is in a different environment: treat as a **stale manifest**, inform the user, and ask via `AskUserQuestion`:
+       > "The existing `.solution-manifest.json` points to solution `{uniqueName}` v{version} which I could not find in the current environment. Would you like to: 1) Start fresh (back up the manifest and create a new solution), 2) Abort so you can investigate?"
+       Proceed only after an explicit choice.
+   - **If absent**: set `syncMode = false` — this is a fresh setup.
+7. **Report the chosen mode** to the user:
+   - `syncMode = true`: "Found existing solution `{uniqueName}` v{version}. Running in **sync mode** — I'll discover the current site inventory, diff against what's already in the solution, and only add missing components."
+   - `syncMode = false`: "No existing solution manifest found. Running a **fresh setup** — I'll create a publisher and solution, then add all site components."
 
-6. **Check for split plan (multi-solution mode)** — look for `.alm-split-plan.json` (written by `plan-alm` Phase 1 Step 10):
+8. **Check for split plan (multi-solution mode)** — look for `.alm-split-plan.json` (written by `plan-alm` Phase 1 Step 10):
    - If found and `proposedSolutions.length > 1`, set `MULTI_SOLUTION_MODE = true` and store the array as `PROPOSED_SOLUTIONS`.
    - In multi-solution mode:
      - Phase 2 asks for publisher details **once** (shared across all solutions) and presents the proposed solution names/versions for **confirmation** (user can override each before proceeding).
@@ -77,6 +87,8 @@ Steps:
    - If not found or `proposedSolutions.length === 1`, proceed in single-solution mode (existing flow).
 
 ### Phase 2 — Gather Solution Configuration
+
+> **Skip this entire phase when `syncMode = true`.** Use `existingSolution.publisher` and `existingSolution.solution` from the manifest instead. Jump to Phase 5.
 
 Ask user (via `AskUserQuestion`) for:
 
@@ -92,6 +104,8 @@ Present a confirmation summary of all values and wait for user approval before p
 > **Key Decision Point**: Publisher prefix and publisher unique name are **irreversible** — pause and explicitly confirm with the user before proceeding.
 
 ### Phase 3 — Check Existing State
+
+> **Skip this entire phase when `syncMode = true`.** The manifest guarantees the solution exists and we already validated it in Phase 1 Step 6.
 
 Before creating anything, check if publisher and solution already exist:
 
@@ -114,6 +128,16 @@ Report findings to user:
 Wait for user confirmation before proceeding.
 
 ### Phase 4 — Create Publisher and Solution
+
+> **Skip this entire phase when `syncMode = true`.** The publisher and solution already exist.
+>
+> **Version bump in sync mode**: before any add operations in Phase 5, PATCH the existing solution to the next revision so exports cleanly supersede the prior version:
+> ```
+> PATCH {envUrl}/api/data/v9.2/solutions({solutionId})
+> Headers: If-Match: *
+> Body: { "version": "{currentVersion with patch bumped}" }
+> ```
+> Where `currentVersion with patch bumped` increments the fourth segment (`1.0.0.2 → 1.0.0.3`). Update `existingSolution.solution.version` locally so the final manifest write reflects the bump. Do this **before** Step 5.6's component adds, so the manifest stays consistent if the skill is interrupted midway.
 
 Refer to `${CLAUDE_PLUGIN_ROOT}/references/solution-api-patterns.md` for exact request body templates.
 
@@ -140,6 +164,10 @@ Refer to `${CLAUDE_PLUGIN_ROOT}/references/solution-api-patterns.md` for exact r
 ### Phase 5 — Add Site Components
 
 Refer to `${CLAUDE_PLUGIN_ROOT}/references/solution-api-patterns.md` for `AddSolutionComponent` body templates and `powerpagecomponents` discovery patterns.
+
+> **Sync-mode behavior**: When `syncMode = true`, run the discovery helper with `--solutionId` populated and use the returned `missing.*` arrays as the candidate set. Everything else in this phase (dynamic component-type lookup in 5.1, categorization in 5.3, OAuth secret conversion in 5.4, orphan adoption in 5.4b, manifest summary in 5.5, bulk add in 5.6) runs the same way, just with a pre-filtered "only things that aren't already in the solution" list. The goal of sync mode is: a user who added a server logic, bot, flow, or env var *after* `setup-solution` last ran can re-invoke the skill and get those components adopted without any fresh-setup prompts.
+>
+> **Fresh-mode behavior** (`syncMode = false`): run the full discovery as documented below — every ppc, every site language, every custom table, every publisher-prefix env var becomes a candidate for inclusion.
 
 #### Step 5.1 — Discover Component Types Dynamically
 
@@ -290,6 +318,48 @@ No user decision required. These are automatically included in the solution as-i
 These are never added to the solution. At Step 5.5, display them in a neutral note box:
 > "The following OAuth credential secrets are excluded from the solution and must be configured manually in each target environment after deployment."
 
+#### Step 5.4b — Adopt Orphaned Env Var Definitions
+
+Separately from the OAuth-secret conversion above, other skills (notably `setup-auth`, `add-server-logic`, and `configure-env-variables`) may have previously created environment variable definitions that were never added to a user solution — they land in the `Default` solution and silently drift. This step discovers and adopts them.
+
+Run the shared discovery helper to get the complete site inventory in one call:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/lib/discover-site-components.js" \
+  --envUrl "{envUrl}" --token "{token}" \
+  --siteId "{websiteRecordId}" \
+  --publisherPrefix "{publisherPrefix}" \
+  --solutionId "{solutionId}"
+```
+
+Parse stdout as JSON and read `missing.envVars` — env var definitions whose `schemaname` starts with the publisher prefix but are not already `solutioncomponents` of this solution.
+
+For each entry, also query which solution it currently belongs to (so the user can tell `Default`-only orphans apart from env vars that another user solution intentionally owns):
+
+```
+GET {envUrl}/api/data/v9.2/solutioncomponents
+  ?$filter=objectid eq {definitionId}&$select=_solutionid_value
+```
+
+Then fetch the solution's `uniquename` for each hit. Build per-env-var tags:
+- `DEFAULT-ONLY` — only the `Default` solution owns it (classic orphan from another skill).
+- `IN OTHER SOLUTION: <uniquename>` — owned by a user solution; the user may intentionally want it scoped there.
+
+If at least one env var has the `DEFAULT-ONLY` tag, prompt via `AskUserQuestion` with `multiSelect: true`:
+
+> "We found env var definitions with your publisher prefix (`{prefix}_`) that aren't in **{solutionUniqueName}** yet. Select the ones you want to include. Definitions only — values stay per-environment and won't travel.
+>
+> 1. `{schemaName}` ({displayName}) — type {type}, currently in: **{tag}**
+> 2. ...
+>
+> Plus: **Include all DEFAULT-ONLY orphans (Recommended)** / **Skip for now**"
+
+Collect selected entries into `adoptedEnvVars: [{ definitionId, schemaName, displayName, type }]`.
+
+If none are selected or the list is empty, `adoptedEnvVars` stays empty — the skill continues silently.
+
+> **Why this step exists**: before this check, env vars created by other skills were silently excluded from the site's solution and didn't travel to staging/prod. Surfacing them here is the cross-skill safety net required by the ALM-aware-by-default principle in `AGENTS.md`.
+
 #### Step 5.5 — Present Full Manifest and Get User Confirmation
 
 **This is the key decision point.** Build a full manifest of everything that will be added and present it to the user before writing anything.
@@ -340,11 +410,17 @@ DATAVERSE TABLES (schema only — no data)
   ...
 
 ENV VAR DEFINITIONS (componenttype 380)
-  ✓ ids_auth_openauth_microsoft_clientsecret (Secret)
+  ✓ ids_auth_openauth_microsoft_clientsecret (Secret)     [converted from OAuth secret]
+  ✓ crd50_auth_openauth_microsoft_clientsecret (Secret)   [ADOPTED — was in Default only]
   ...
 
 Total to add: ~{N} components
 ```
+
+For clarity, use these tags after each env var entry in the manifest:
+- `[converted from OAuth secret]` — created in Step 5.4 from a site setting
+- `[ADOPTED — was in Default only]` — existed before this run; being pulled into the solution in Step 5.4b
+- `[ADOPTED — also in {otherSolutionName}]` — existed in another user solution; being additionally added here (user explicitly opted in)
 
 If `cloudFlows` is non-empty, use `AskUserQuestion` with `multiSelect: true`:
 - Option: "Include all N active cloud flows (Recommended)"
@@ -378,7 +454,9 @@ The components array should be built in this order:
 3. **All confirmed powerpagecomponent groups** — one entry per component using `subComponentType`
    - Table Permissions (type 18) are standard powerpagecomponents — include by default
    - Exclude OAuth secret site settings that were not converted to env vars
-4. **Env var definitions** (for converted OAuth secrets) — `{ componentType: 380 }`
+4. **Env var definitions** — one entry per definition with `{ componentType: 380 }`. Include:
+   - Every env var created in Step 5.4 (OAuth-secret conversion)
+   - Every entry in `adoptedEnvVars` from Step 5.4b (orphans the user chose to include)
 5. **Dataverse tables** — `{ componentType: 1, componentId: MetadataId }`
 6. **Confirmed cloud flows** (from Step 5.5) — `{ componentId: workflowId, componentType: workflowComponentType }` (uses runtime-discovered type)
 7. **Confirmed bot components** — `{ componentId: botId, componentType: botComponentType }` (uses runtime-discovered type)
