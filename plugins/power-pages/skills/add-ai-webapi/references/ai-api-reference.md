@@ -241,6 +241,117 @@ section — hiding reads as a broken feature because the user sees their query d
 the render on `Summary.trim().length === 0` (not just `!Summary`) to catch whitespace-only
 responses.
 
+### Gen AI Search disabled state — HTTP 200 with embedded error envelope
+
+**Not documented on Microsoft Learn.** Observed in the wild: when the site-level **Site search
+with generative AI (preview)** toggle is off, the Search Summary endpoint returns HTTP 200 with
+a body of the form:
+
+```json
+{ "Code": 400, "Message": "Gen AI Search is disabled." }
+```
+
+No `Summary`, no `Citations`, no other fields. Naive code that checks `response.ok` and then
+returns `response.json()` treats this as a success and ends up rendering the empty-state message
+("No related items found") — which is misleading because no amount of retry or query tweaking
+will fix it. Only a site admin flipping the toggle will.
+
+**Detection rule.** After a 200, if the body has a top-level `Code` (number) and `Message`
+(string) and no `Summary`, it is the disabled-state envelope — convert to a typed error instead
+of a success response. This is distinct from Data Summarization's `90041001` error, which
+arrives as a proper HTTP 400 with `{ error: { code: "90041001", ... } }` (see §2 Error codes).
+Different surface, different envelope, same underlying admin toggle.
+
+**Why the server behaves this way.** Search Summary is the only one of the three AI endpoints
+gated by a **site-level** toggle rather than per-table site settings — the toggle lives in the
+maker's Set up workspace, not in `.powerpages-site/site-settings/`. When the toggle is off, the
+endpoint is registered but short-circuits with a canned response body. The HTTP 200 is a quirk
+of how the short-circuit path is wired on the server side.
+
+**Enable procedure** (from Microsoft Learn — fetched 2026-04-20):
+
+1. Go to the site's **Set up workspace**
+2. Under **Copilot** select **Site search (preview)**
+3. Turn on **Enable Site search with generative AI (preview)**
+
+Link to surface in the UI when this state is detected: `https://learn.microsoft.com/power-pages/configure/search/generative-ai#enable-site-search-with-generative-ai`
+
+**UI consequences.**
+
+- Render a specific remediation card in place of the summary: headline "AI search summary is
+  turned off for this site", explanation mentioning the workspace path above, and a link to the
+  Learn doc. Do NOT show a retry button in this state — retry is useless until the toggle flips.
+- Keep the keyword search results (from `/_api/search/v1.0/query`) rendering as normal — the
+  toggle only disables the AI summary layer, not keyword search.
+- Do NOT treat this as equivalent to the empty-results state ("No related items found") —
+  conflating them hides a real configuration problem under a generic "we couldn't find anything"
+  message.
+
+The generated service code in `src/services/aiSummaryService.*` handles this via a
+`SearchSummaryApiError` exception plus an `isGenAiSearchDisabled(err)` predicate; see the
+agent's §3.2 for the reference implementation.
+
+### Troubleshooting: AI feature appears disabled (admin hierarchy)
+
+This checklist applies to **both Search Summary and the Data Summarization API** — the same
+Copilot Hub admin surface gates both features. When the maker has flipped the site-level toggle
+on but the API still returns a disabled response, the cause is usually higher up in the
+hierarchy. Walk the levels top-down; each level **overrides** the one below it.
+
+Admin reference: [Copilot hub for Power Pages (preview)](https://learn.microsoft.com/en-us/power-pages/admin/copilot-hub)
+
+**1. Tenant-level governance (PowerShell).** Controlled via the
+`enableGenerativeAIFeaturesForSiteUsers` PowerShell setting. If this is off at the tenant level,
+nothing downstream can be enabled — admins opening Copilot Hub will see an error prompting them
+to enable tenant-level settings first. Only **Power Platform administrator** or **Dynamics 365
+administrator** (Azure AD service-admin roles) can change this.
+
+**2. Environment-level governance (Copilot Hub).** Power Platform Admin Center → **Copilot Hub**
+→ **Power Pages** tab → **Settings**. Each end-user AI feature (Search summary, Summarization
+API, Chat agent, AI form fill, AI summary list) has its own per-feature governance page. For the
+selected environment, the admin picks one of:
+
+| Option | Effect |
+|--------|--------|
+| **On - All sites** | Feature enabled in every site in the environment |
+| **All sites except specific sites** | Enabled everywhere **except** listed sites. **Overrides maker config** on the excluded sites. |
+| **Specific sites** | Enabled **only** on listed sites. Prevents access in all other sites in the environment. |
+| **None of the sites** | Disabled for every site. **Overrides maker config** — even if the maker toggle is on, the feature won't work. |
+
+**The admin setting wins.** If Search Summary returns the disabled envelope even though the
+maker toggle is on, check whether this environment/site is excluded here. This is the most
+common cause of "the toggle is on but it still says disabled".
+
+**3. Site-level maker toggle.** Set up workspace → Copilot → Site search (preview) → Enable Site
+search with generative AI (preview). Only relevant when the two levels above allow it. In the
+studio, if admin has disabled the feature at the environment level, **the maker-side toggle
+appears greyed out** with an in-product message directing the maker to their admin.
+
+**4. Runtime version.** Copilot Hub requires site runtime **9.7.4.xx or later**. If the site is
+on an older runtime, some AI features won't exist — the admin UI may show them but the runtime
+won't serve them. Upgrade the site's runtime version before chasing other causes.
+
+**5. Cross-region data movement.** If the environment's region lacks sufficient Azure OpenAI
+capacity and the "Move data across regions" setting is **disallowed**, Copilot features
+silently fail. Admins can't configure the feature in Copilot Hub in this case. See [Move data
+across regions for Copilots and generative AI features](https://learn.microsoft.com/en-us/power-platform/admin/geographical-availability-copilot).
+
+**6. Bing search dependency** (chat/search features only). If Bing search is disabled at the
+environment level, any Copilot feature that depends on Bing search won't function. Less common
+for Summarization API, but worth checking if the symptom is intermittent.
+
+**What end users see when disabled.** Per Microsoft's admin doc, when governance blocks a
+feature for end users, *"users see a regular search and don't get a generative AI powered search
+summary. Users don't see any messaging about organizational policies or governance controls."*
+This is exactly why the generated code surfaces a remediation card on the disabled envelope —
+without it, the user sees a silent fallback and thinks the feature is broken, when it was
+actually governed off by an admin.
+
+**Deprecated surface.** The older tenant-level governance configuration page is deprecated; all
+admin governance now flows through Copilot Hub → Power Pages → Settings. If someone points at
+the old governance page during debugging, redirect them — their existing settings are preserved
+but new changes must go through the hub.
+
 ---
 
 ## 2. Data Summarization API
@@ -367,6 +478,19 @@ Both paragraph and array shapes should continue to work — smoke-test both duri
 | `90041004` | Content length exceeds the limit |
 | `90041005` | No records found to summarize |
 | `90041006` | Error occurred while summarizing the content. |
+
+> **`90041001` can originate from three different levels.** The message says "Generative AI
+> features are disabled" but doesn't say *where* they're disabled. Walk the admin hierarchy in
+> §1's [*Troubleshooting: AI feature appears disabled*](#troubleshooting-ai-feature-appears-disabled-admin-hierarchy)
+> checklist — tenant PowerShell setting, Copilot Hub environment/site governance, and the
+> site-level Summarization API toggle each produce this same code. The retry button will not
+> help; an admin has to change the governance state. The Copilot Hub governance setting for this
+> feature is **Summarization API** (listed separately from Search summary).
+>
+> **`90041003` vs `90041001`.** `90041003` means the per-site `Summarization/Data/Enable` site
+> setting is missing or false — the fix is to run `ai-webapi-settings-architect` (or edit the
+> site setting directly). `90041001` is higher in the hierarchy (tenant or environment
+> governance) and typically requires admin intervention.
 
 ### Empty response handling
 

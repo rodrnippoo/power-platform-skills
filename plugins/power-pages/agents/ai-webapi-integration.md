@@ -287,7 +287,41 @@ export interface SearchSummaryResponse {
   Chunks?: SearchSummaryChunk[];
   ErrorMessage?: string;
   ResponseStatus?: string;
+  // Embedded error envelope: the server sometimes returns HTTP 200 with `Code` + `Message` at the
+  // top level instead of a success body — most commonly `{ Code: 400, Message: "Gen AI Search is
+  // disabled." }` when the site-level toggle is off. `fetchSearchSummary` detects this and throws
+  // `SearchSummaryApiError` so callers never see this shape as a success.
+  Code?: number;
+  Message?: string;
 }
+
+/**
+ * Thrown when the Search Summary API returns HTTP 200 with an embedded error envelope
+ * (`{ Code, Message }` instead of `{ Summary, Citations }`). Use `isGenAiSearchDisabled(err)`
+ * to detect the specific "Gen AI Search is disabled" case and surface the enable link.
+ */
+export class SearchSummaryApiError extends Error {
+  readonly code: number;
+  constructor(message: string, code: number) {
+    super(message);
+    this.name = 'SearchSummaryApiError';
+    this.code = code;
+  }
+}
+
+/**
+ * True when the given error is the well-known "Gen AI Search is disabled" envelope. The UI
+ * should render the enable instructions (Set up workspace → Copilot → Site search (preview) →
+ * Enable Site search with generative AI (preview)) and a link to `GEN_AI_SEARCH_ENABLE_DOC_URL`
+ * instead of a generic "no results" or retry message — a retry will not help; the admin has to
+ * flip the toggle.
+ */
+export function isGenAiSearchDisabled(err: unknown): err is SearchSummaryApiError {
+  return err instanceof SearchSummaryApiError && /gen ai search is disabled/i.test(err.message);
+}
+
+export const GEN_AI_SEARCH_ENABLE_DOC_URL =
+  'https://learn.microsoft.com/power-pages/configure/search/generative-ai#enable-site-search-with-generative-ai';
 
 export async function fetchSearchSummary(userQuery: string): Promise<SearchSummaryResponse> {
   const token = await getCsrfToken();
@@ -304,7 +338,15 @@ export async function fetchSearchSummary(userQuery: string): Promise<SearchSumma
   if (!response.ok) {
     throw new Error(`Search summary failed: ${response.status} ${response.statusText}`);
   }
-  return response.json();
+  const body = (await response.json()) as SearchSummaryResponse;
+  // 200-with-embedded-error detection. Search Summary sometimes returns a success status with an
+  // error body — not documented by Microsoft, but observable in the wild when the site-level Gen
+  // AI Search toggle is off. Distinguish from a legitimate success: the envelope has `Code` +
+  // `Message` and no `Summary`.
+  if (typeof body.Code === 'number' && typeof body.Message === 'string' && !body.Summary) {
+    throw new SearchSummaryApiError(body.Message, body.Code);
+  }
+  return body;
 }
 ```
 
@@ -572,7 +614,22 @@ create a parallel file.
 
 ## Step 5: Wire Into the UI
 
-Find the target page/component and add real call sites:
+Find the target page/component and add real call sites.
+
+**Reserved-slot markers (check first).** The orchestrator may tell you the target file already
+contains a `POWERPAGES:AI-SLOT kind=<pick>` comment — a pre-decided insertion point planted by
+`/create-site` when the maker committed to this AI surface during site discovery. When the
+orchestrator flags the target as `source: marker`, the marker's file + line is authoritative:
+insert the generated UI at that exact location, and **delete the marker comment as part of the
+same edit**. Leaving the marker behind produces dead metadata next to the live code and confuses
+future `/add-ai-webapi` runs (the explore phase would see the old marker as a still-reserved
+slot). Supported marker forms:
+
+- `{/* POWERPAGES:AI-SLOT kind=<pick> */}` in JSX
+- `<!-- POWERPAGES:AI-SLOT kind=<pick> -->` in Vue SFC templates, Angular templates, and Astro
+
+When there is no marker (heuristic-sourced target), fall back to the per-kind placement rules
+below.
 
 - **Case preset** → find the incident/case detail page (look for components that read a case `id`
   from the URL, or match names like `Case*`, `Incident*`, `Ticket*`). Add a collapsible summary
@@ -739,9 +796,32 @@ instead.
 | Branch | Search Summary | Data Summarization / Case preset |
 |--------|---------------|----------------------------------|
 | `loading` | Shimmer block in the summary slot, citation list skeleton | Shimmer block inside the Copilot card (gradient border + header still visible) |
-| `error` | Error message + **Retry** button | Error message (use `dataSummaryErrorMessage` for code dispatch) + **Retry** button |
+| `error` | Generic: error message + **Retry** button. **Disabled sub-state** (see below): inline the enable instructions + link — no retry, the admin has to flip the toggle. | Error message (use `dataSummaryErrorMessage` for code dispatch) + **Retry** button. For `90041001` (Gen AI features disabled), also surface the enable link since retry won't help. |
 | `content` | `parseSummaryWithCitations` → clickable tokens; optional sources list using `CitationTitleMapping` | `Summary` text + chip row of `Recommendations` (each chip calls `refine(config)`) + disclaimer |
 | `empty` | "No related items found for your query." | Case preset: "No case summary yet — add a description or a comment and try again." Generic data: "No summary available for this record yet." |
+
+**Gen AI disabled sub-state (Search Summary).** When `fetchSearchSummary` throws `SearchSummaryApiError` and `isGenAiSearchDisabled(err)` returns true, the response was a 200-with-embedded-error envelope (`{ Code: 400, Message: "Gen AI Search is disabled." }`) — **not** an empty-results case and **not** a retryable failure. Retrying will loop forever. Render a calm, specific remediation card in place of the summary:
+
+- Headline: *"AI search summary is turned off for this site."*
+- Explanation: *"A site admin needs to enable it in the Set up workspace: Copilot → Site search (preview) → Enable Site search with generative AI (preview)."*
+- Link: anchor to `GEN_AI_SEARCH_ENABLE_DOC_URL` (exported from the service), label *"Enable AI search in Power Pages"*.
+- Do NOT include a Retry button in this sub-state — it will hit the same disabled response on every call.
+- Keep the keyword search results rendering below this card intact; the disabled state affects only the AI summary, not the underlying keyword hits from `/_api/search/v1.0/query`.
+
+Pattern-match in the catch block (TypeScript example — translate to Vue/Angular/Astro as needed):
+
+```tsx
+try {
+  const result = await fetchSearchSummary(userQuery);
+  // ... render result
+} catch (err) {
+  if (isGenAiSearchDisabled(err)) {
+    setUiState({ kind: 'ai-disabled', docUrl: GEN_AI_SEARCH_ENABLE_DOC_URL });
+  } else {
+    setUiState({ kind: 'error', message: (err as Error).message });
+  }
+}
+```
 
 Additional rules:
 
@@ -752,10 +832,12 @@ Additional rules:
   `recommendationConfig` set to the chosen `Config` value.
 - Add an "AI-generated content may be incorrect" disclaimer next to the summary output.
 
-Detect empty explicitly: for Search Summary, `!response.Summary?.trim()`; for Data Summarization,
-either a `90041005` error code or `!response.Summary?.trim()` on a 200. **Never** collapse the
-section via `response.Summary && (<Section />)` — that's the hide-on-empty pattern the rest of
-this checklist is explicitly avoiding.
+Detect empty explicitly: for Search Summary, `!response.Summary?.trim()` (by the time the
+response reaches the UI layer, the fetcher has already peeled off the disabled-state envelope as
+a thrown `SearchSummaryApiError`, so `empty` here means a legitimate "no matching knowledge
+articles" case); for Data Summarization, either a `90041005` error code or `!response.Summary?.trim()`
+on a 200. **Never** collapse the section via `response.Summary && (<Section />)` — that's the
+hide-on-empty pattern the rest of this checklist is explicitly avoiding.
 
 Do not modify existing, working call sites — only add new ones or upgrade the specified component.
 

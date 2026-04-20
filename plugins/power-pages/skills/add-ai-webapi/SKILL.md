@@ -33,13 +33,25 @@ Integrate Power Pages generative-AI summarization into a code site. This skill f
 > workflow; fetch the Microsoft Learn source pages with `mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch`
 > if the user asks for the latest.
 
-> **Preview notice**: the Data Summarization API and the Case-page Copilot preset are both marked
-> **preview** on Microsoft Learn. If the runtime returns error code `90041001` the tenant does not
-> have generative AI features enabled — admins must turn them on at the environment level before
-> any of this skill's output will work end-to-end. Search summary is also behind a preview
-> workspace toggle (`Copilot → Site search (preview) → Enable Site search with generative AI
-> (preview)`). Mention this explicitly to the user before Phase 7, and again in the Phase 8
-> summary.
+> **Preview notice**: all three APIs are preview features gated by a **three-level admin
+> hierarchy** — tenant PowerShell setting (`enableGenerativeAIFeaturesForSiteUsers`), Copilot Hub
+> environment/site governance, and the site-level maker toggle (for Search Summary: Set up
+> workspace → Copilot → Site search (preview) → Enable Site search with generative AI (preview)).
+> **Each level overrides the one below it**, so "the maker toggle is on but the API still says
+> disabled" is a real scenario — admin-level governance wins.
+>
+> The two endpoints surface disablement differently:
+>
+> - **Search Summary** → HTTP **200** with an embedded envelope `{ Code: 400, Message: "Gen AI
+>   Search is disabled." }`. The generated `fetchSearchSummary` detects this and throws
+>   `SearchSummaryApiError`; the UI renders a remediation card.
+> - **Data Summarization / Case preset** → HTTP **400** with `error.code = 90041001`.
+>
+> Full troubleshooting checklist (tenant → environment → site, plus runtime version, Bing
+> dependency, and cross-region data movement) lives in
+> `references/ai-api-reference.md` §1 "Troubleshooting: AI feature appears disabled (admin
+> hierarchy)" — point users there when either disablement shape surfaces. Mention this hierarchy
+> explicitly to the user before Phase 7, and again in the Phase 8 summary.
 
 > **Built-in search control vs. custom code path**: if the site uses the Microsoft-shipped Power
 > Pages search **control** and only wants AI-summarised search results on that page, they don't
@@ -211,6 +223,28 @@ Use the **Explore agent** (via `Task` with `subagent_type: "Explore"`) with thor
 > "Analyse this Power Pages code site for generative-AI summarization integration opportunities.
 > Report the following as structured sections:
 >
+> **Reserved slot markers (check this first).** Grep the `src/` tree for the comment pattern
+> `POWERPAGES:AI-SLOT`. Sites scaffolded by `/create-site` with AI picks in Phase 3 carry these
+> markers at the intended insertion point — for example `{/* POWERPAGES:AI-SLOT kind=case-preset */}`
+> in a JSX CaseDetail page, or `<!-- POWERPAGES:AI-SLOT kind=search-summary -->` in a Vue/Angular/Astro
+> search page. Recognised `kind=` values: `search-summary`, `data-summarization`, `case-preset`.
+> For every match, report:
+>
+> - File path and line number of the marker
+> - `kind=` value (tells you which API variant the maker already picked)
+> - The containing component/page name
+>
+> These markers are **authoritative placement hints** — when a marker exists for a given target,
+> use its file + line as the insertion point and skip the filename heuristic below for that target.
+> A marker also tells you that the maker has already committed to adding this AI surface, so treat
+> it as high-confidence in the manifest (don't ask 'should we add an AI summary here?' — they
+> already decided). Flag the manifest row with `source: marker` so Phase 5 knows the location is
+> pre-decided and the agent should remove the marker comment when it inserts the generated code.
+>
+> If a marker's `kind` doesn't match any natural target page (e.g., a `kind=case-preset` marker on
+> a page with no case/incident context), flag as `orphan-marker` and surface it in Phase 3 for the
+> user to resolve — either move the marker or drop the pick. Do not silently ignore orphans.
+>
 > **Search summary candidates.** Find any search page/component (filenames matching `Search*`, or
 > components that call `/_api/search/v1.0/query`). Note the file path and whether it currently
 > calls `/_api/search/v1.0/summary`. (Note: `*Results*` alone is ambiguous — a file named
@@ -312,14 +346,14 @@ Use the **Explore agent** (via `Task` with `subagent_type: "Explore"`) with thor
 > them as `missing`, otherwise the skill will spuriously invoke `ai-webapi-settings-architect`
 > for a search-only run."
 
-From the Explore agent's output, compile the **integration manifest**:
+From the Explore agent's output, compile the **integration manifest** (the `Source` column records whether a row came from a reserved marker or from heuristic discovery — marker-sourced rows skip Phase 3's "should we add this?" question):
 
-| # | API | Target file | Target kind | Entity Set | `$select` / `$expand` | Layer 1/2 status | Layer 3 status |
-|---|-----|-------------|-------------|-----------|----------------------|------------------|----------------|
-| 1 | Search summary | `src/pages/SearchResults.tsx` | n/a | — | — | n/a (search needs no per-table prereqs) | n/a (search uses workspace toggle, no per-setting toggle) |
-| 2 | Case preset | `src/pages/CaseDetail.tsx` | single-record | `incidents` | `$select=description,title&$expand=incident_adx_portalcomments($select=description)` | missing | missing (`Summarization/prompt/case_summary` not present) |
-| 3 | Data summarization | `src/pages/ProductDetail.tsx` | single-record | `cr4fc_products` | `$select=cr4fc_name,cr4fc_description` | missing | missing (`Summarization/Data/Enable` + prompt identifier not present) |
-| 4 | Data summarization | `src/pages/WorkOrderList.tsx` | list | `cr363_workorders` | `$select=cr363_name,cr363_status,cr363_priority&$orderby=createdon desc&$count=true` | missing | missing (`Summarization/Data/Enable` + prompt identifier not present; `Summarization/Data/ContentSizeLimit=200000` recommended) |
+| # | API | Target file | Target kind | Entity Set | `$select` / `$expand` | Source | Layer 1/2 status | Layer 3 status |
+|---|-----|-------------|-------------|-----------|----------------------|--------|------------------|----------------|
+| 1 | Search summary | `src/pages/SearchResults.tsx` | n/a | — | — | marker | n/a (search needs no per-table prereqs) | n/a (search uses workspace toggle, no per-setting toggle) |
+| 2 | Case preset | `src/pages/CaseDetail.tsx` | single-record | `incidents` | `$select=description,title&$expand=incident_adx_portalcomments($select=description)` | marker | missing | missing (`Summarization/prompt/case_summary` not present) |
+| 3 | Data summarization | `src/pages/ProductDetail.tsx` | single-record | `cr4fc_products` | `$select=cr4fc_name,cr4fc_description` | heuristic | missing | missing (`Summarization/Data/Enable` + prompt identifier not present) |
+| 4 | Data summarization | `src/pages/WorkOrderList.tsx` | list | `cr363_workorders` | `$select=cr363_name,cr363_status,cr363_priority&$orderby=createdon desc&$count=true` | heuristic | missing | missing (`Summarization/Data/Enable` + prompt identifier not present; `Summarization/Data/ContentSizeLimit=200000` recommended) |
 
 Compute the two delegation decisions directly from the two status columns:
 
@@ -715,12 +749,20 @@ On **Skip**: proceed without committing.
 **Goal**: Confirm every expected file exists, all POSTs set both required headers, and the project
 builds.
 
-> **Preview-feature reminder** (per the Preview notice at the top of this skill): even after the
-> build passes, the runtime needs a tenant admin to enable generative AI features (otherwise the
-> first call returns `90041001`), and Search Summary additionally needs **Site search with
-> generative AI (preview)** toggled on in the site's Copilot workspace. Surface both reminders
-> here so the user isn't surprised after deploy if everything looks "configured" but the API
-> still fails.
+> **Preview-feature reminder** (per the Preview notice at the top of this skill): a green build
+> doesn't mean the API will return a summary at runtime. Two things can still block it:
+>
+> 1. **Admin-level governance** (tenant PowerShell setting or Copilot Hub → Power Pages →
+>    Settings, env or site scope). Data Summarization surfaces this as HTTP 400 with error code
+>    `90041001`; Search Summary surfaces it as HTTP 200 with an embedded `{ Code: 400, Message:
+>    "Gen AI Search is disabled." }` envelope — both mean "an admin has disabled AI somewhere
+>    above the site level", and retry won't help.
+> 2. **Site-level maker toggle** for Search Summary — Set up workspace → Copilot → Site search
+>    (preview) → Enable Site search with generative AI (preview). Greyed out in the studio when
+>    admin-level governance blocks it.
+>
+> Tell the user now so they aren't surprised when the post-deploy test hits either disablement
+> shape. Walk the admin hierarchy in `references/ai-api-reference.md` §1 if it does.
 
 ### 7.1 File inventory
 
@@ -835,12 +877,26 @@ new settings and permissions.
     **not** the raw `/page-not-found/?id=<guid>` URLs the API returns on a code site. If a
     citation is dropping the user on the built-in 404 page, the `extractKnowledgeArticleId`
     rewrite isn't wired — see the agent's Step 5 "Citation URL rewriting" section.
+  - **Disabled-state card** (expected branch, not a bug) — if the search shows a card headed
+    *"AI search summary is turned off for this site"* with a link to the enable doc instead of a
+    summary paragraph, the Search Summary endpoint returned its 200-with-embedded-error envelope
+    (`{ Code: 400, Message: "Gen AI Search is disabled." }`). This happens when any level of the
+    admin hierarchy has AI disabled — most commonly the site-level maker toggle. Walk the user
+    through the checklist in `references/ai-api-reference.md` §1 "Troubleshooting: AI feature
+    appears disabled (admin hierarchy)". A retry will never fix this; an admin or maker has to
+    flip the toggle. For Data Summarization the equivalent branch is an HTTP 400 with
+    `error.code = 90041001` — same checklist, same resolution path.
 - **Error-code reference**: full table of `90041001`–`90041006` and what each means lives in
   [`references/ai-api-reference.md` §2 Error codes](references/ai-api-reference.md#error-codes-http-400).
-  Open it when the user reports a 400. One runtime-specific note worth surfacing up front:
-  **403 on a summarization call is always a Layer 1/2 issue** (column casing in
-  `Webapi/<table>/fields`, or missing `read: true` table permission) — re-run `/integrate-webapi`
-  in AI-only read mode to fix it rather than hand-editing YAML.
+  Open it when the user reports a 400. Two runtime-specific notes worth surfacing up front:
+  - **403 on a summarization call is always a Layer 1/2 issue** (column casing in
+    `Webapi/<table>/fields`, or missing `read: true` table permission) — re-run
+    `/integrate-webapi` in AI-only read mode to fix it rather than hand-editing YAML.
+  - **`90041001` (Data Summarization) and the Search Summary 200-envelope** both mean "AI is
+    disabled somewhere in the tenant/environment/site hierarchy". Retry won't help; an admin has
+    to change governance or a maker has to flip the site toggle. The
+    [Troubleshooting: AI feature appears disabled (admin hierarchy)](references/ai-api-reference.md#troubleshooting-ai-feature-appears-disabled-admin-hierarchy)
+    checklist in §1 of the reference is the resolution playbook for both shapes.
 - **Column permission profiles can silently hide content.** If the summary has obvious omissions,
   check Dataverse column permission profiles on the web role before suspecting the prompt or
   fields list.
