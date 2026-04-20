@@ -48,11 +48,6 @@ Populate Dataverse tables with sample records via OData API so users can test an
 
 Check if `.datamodel-manifest.json` exists in the project root (written by the `setup-datamodel` skill). If it exists, read it -- it already contains table logical names, display names, and column info.
 
-```bash
-# Check if manifest exists
-Test-Path ".datamodel-manifest.json"
-```
-
 See `${CLAUDE_PLUGIN_ROOT}/references/datamodel-manifest-schema.md` for the full manifest schema.
 
 ### Path B: Query OData API (Fallback)
