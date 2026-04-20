@@ -151,12 +151,13 @@ function get() {
 Client — note the extra `data` layer before reaching `Body`:
 
 ```typescript
-const envelope = await powerPagesFetch<{ data: string; success: boolean; error: string | null }>(
+const envelope = await powerPagesFetch<{ data: string | null; success: boolean; error: string | null }>(
     '/_api/serverlogics/contacts-crud',
     { method: 'GET' }
 );
 if (!envelope) throw new Error('Empty response from contacts-crud');
 if (!envelope.success) throw new Error(envelope.error ?? 'Failed');
+if (envelope.data == null) throw new Error('Missing response data from contacts-crud');
 const payload = JSON.parse(envelope.data) as { status: string; data: { Body: string; StatusCode: number; Headers: Record<string, string> } };
 const outer   = payload.data;                 // connector result still wrapped here
 const body    = JSON.parse(outer.Body);       // { "@odata.context": "...", value: [...] }
@@ -198,12 +199,13 @@ function get() {
 Client:
 
 ```typescript
-const envelope = await powerPagesFetch<{ data: string; success: boolean; error: string | null }>(
+const envelope = await powerPagesFetch<{ data: string | null; success: boolean; error: string | null }>(
     '/_api/serverlogics/getContacts',
     { method: 'GET' }
 );
 if (!envelope) throw new Error('Empty response from getContacts');
 if (!envelope.success) throw new Error(envelope.error ?? 'Failed');
+if (envelope.data == null) throw new Error('Missing response data from getContacts');
 const payload = JSON.parse(envelope.data) as { status: string; contacts: Contact[] };
 return payload.contacts;
 ```
@@ -275,13 +277,19 @@ export async function callServerLogic<T = unknown>(
         ? `/_api/serverlogics/${endpointName}?${new URLSearchParams(params)}`
         : `/_api/serverlogics/${endpointName}`;
 
-    const envelope = await powerPagesFetch<{ data: string; success: boolean; error: string | null }>(url, {
+    const envelope = await powerPagesFetch<{ data: string | null; success: boolean; error: string | null }>(url, {
         method,
         body: body ? JSON.stringify(body) : undefined,
     });
 
+    if (!envelope) {
+        throw new Error(`Empty response from ${endpointName}`);
+    }
     if (!envelope.success) {
         throw new Error(envelope.error ?? 'Server logic call failed');
+    }
+    if (envelope.data == null) {
+        throw new Error(`Missing response data from ${endpointName}`);
     }
 
     return JSON.parse(envelope.data) as T;
