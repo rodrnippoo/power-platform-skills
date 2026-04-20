@@ -181,21 +181,25 @@ Use `AskUserQuestion`:
 
 ## Phase 4: Pre-Migration Safety
 
-**Goal**: Document the current site state for rollback reference
+**Goal**: Document the current site state and choose the migration plan based on environment type
 
 **Actions**:
 
-### 4.1 Determine Site Type
+### 4.1 Determine Environment Type
 
 Use `AskUserQuestion`:
 
 | Question | Header | Options |
 |----------|--------|---------|
-| Is this a production site or a dev/test site? | Site Type | Production, Dev/Test |
+| Which environment is the target for this migration? | Migration Environment | Dev Environment, Test/UAT/Prod Environment |
 
-**If "Production"**: Display advisory guidance:
+**If "Dev Environment"**: Explain the dev plan:
 
-> "Microsoft recommends creating a full copy of the production environment before migration (via Power Platform Admin Center). This is outside the scope of this tool, but if feasible, consider doing it for safety. Also consider scheduling migration during non-business hours."
+> "In a Dev environment, we will migrate configuration data plus customization metadata using `configurationData`. This gives us a full customization report and lets AI guide fixes after reviewing the report."
+
+**If "Test/UAT/Prod Environment"**: Explain the production plan:
+
+> "In Test/UAT/Prod, we should assume configuration data is already available through a solution or prior deployment. We will migrate only `configurationDataReferences` so we preserve existing deployed configuration and avoid moving full transactional data."
 
 ### 4.2 Document Current State
 
@@ -204,24 +208,28 @@ Capture and display:
 - WebSiteId GUID (already captured)
 - Portal ID (if accessible via `/_services/about`)
 - Current data model version (standard)
+- Chosen migration environment type
+- Whether `PowerPages_Core` is installed in the target environment
 
 Store these values for rollback reference in Phase 10.
 
-**Output**: Site type identified, current state documented for rollback reference
+**Output**: Environment type chosen, site state documented for rollback reference
 
 ---
 
 ## Phase 5: Migration Execution
 
-**Goal**: Ensure EDM solutions are provisioned and execute the data migration
+**Goal**: Ensure EDM solutions are provisioned and execute the correct migration mode for the chosen environment
 
 **Actions**:
 
-### 5.1 Check EDM Template Solutions
+### 5.1 Check EDM Template Solutions and Core Package
 
 Some templates require matching EDM-compatible solutions. Inform the user:
 
 > "Templates like **Program Registration** and **Schedule and Manage Meetings** require EDM-compatible solutions to be present in the environment. If they're missing, the migration will show a warning."
+
+Also verify that the `PowerPages_Core` application is installed in the target environment. If it isn't installed, the skill should install it using PAC CLI.
 
 Use `AskUserQuestion`:
 
@@ -233,20 +241,32 @@ Use `AskUserQuestion`:
 
 > "To provision the required EDM solutions, create a new site in an EDM-enabled environment using the same template as your current site. This will install the EDM-compatible solution packages. The dummy site can be deleted after migration."
 
+Then check whether `PowerPages_Core` is installed. If it is missing, install it:
+
+```powershell
+pac application install --application-name "PowerPages_Core"
+```
+
 Wait for the user to confirm they've done this before proceeding.
 
-### 5.2 Choose Migration Mode
+### 5.2 Choose Migration Mode by Environment
 
-Use `AskUserQuestion`:
+Use the environment type captured in Phase 4 to choose the correct mode:
+
+- **Dev Environment** → `configurationData`
+  - Use this mode to migrate site metadata, templates, settings, and customization definitions.
+  - Generate the customization report and let the AI guide post-migration fixes.
+- **Test/UAT/Prod Environment** → `configurationDataReferences`
+  - Use this mode only when configuration data is already available via solution or pac CLI.
+  - Confirm with the user that configuration datasets are already deployed in the target environment before migrating.
+
+Use `AskUserQuestion` if the user selected Test/UAT/Prod:
 
 | Question | Header | Options |
 |----------|--------|---------|
-| Which data should be migrated? | Migration Mode | All — metadata + transactional data (Recommended), Configuration data only — site metadata (web pages, templates, settings, etc.), Configuration data references only — transactional/non-configuration data |
+| Is the required configuration data already available in the target environment via solution deployment or PAC CLI? | Config Data Available | Yes, it is already available, No, I need to make it available first |
 
-Map selection to mode value:
-- "All" → `all`
-- "Configuration data only" → `configurationData`
-- "Configuration data references only" → `configurationDataReferences`
+- **If "No"**: Pause and wait until configuration data is deployed before continuing.
 
 ### 5.3 Execute Migration
 
@@ -254,9 +274,11 @@ Map selection to mode value:
 pac pages migrate-datamodel --webSiteId "<WEBSITE_ID>" --mode <CHOSEN_MODE>
 ```
 
+Where `<CHOSEN_MODE>` is either `configurationData` for Dev or `configurationDataReferences` for Test/UAT/Prod.
+
 If the command outputs a template warning (`Found template <name>. One of the prerequisite for migrate needs Enhanced data model template`), inform the user they need to provision EDM solutions first (see 5.1) and pause.
 
-**Output**: Migration command executed
+**Output**: Correct migration command executed for the chosen environment
 
 ---
 
