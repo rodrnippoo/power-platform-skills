@@ -41,6 +41,7 @@ If the tracking script creates or updates site setting YAML files, include those
 | add-cloud-flow | AddCloudFlow | Site/AI/Skills/AddCloudFlow |
 | integrate-backend | IntegrateBackend | Site/AI/Skills/IntegrateBackend |
 | site-visibility | SiteVisibility | Site/AI/Skills/SiteVisibility |
+| web-application-firewall | WebApplicationFirewall | Site/AI/Skills/WebApplicationFirewall |
 
 ## YAML Format
 

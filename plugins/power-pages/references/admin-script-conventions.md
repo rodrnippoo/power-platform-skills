@@ -58,6 +58,7 @@ A successful command call prints one of:
 
 - The upstream response body as JSON (for read commands).
 - A small status object — `{ "accepted": true }` or `{ "updated": true }` — for write commands whose upstream response is empty.
+- `{ "accepted": true, "operation_location": "...", "retry_after_seconds": N }` for async-start commands on acceptance — callers poll the paired status/rules command for completion.
 - `{ "accepted": false, "alreadyOngoing": true }` for async-start commands when another operation of the same kind is already in progress.
 - `null` for read commands that represent "not applicable" or "no data yet" (e.g., WAF not applicable to this site, no completed scan yet).
 
