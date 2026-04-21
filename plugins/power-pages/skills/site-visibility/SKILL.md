@@ -33,7 +33,7 @@ Who can sign in to a Private site is a separate per-site allow-list managed from
 - `pac pages list` and `.powerpages-site/website.yml` store the **website record id**, not the portal id. Every command in this skill takes the portal id. Resolve by running `website.js --websiteRecordId <guid>` first; passing the record id produces `A001` (portal not found).
 - Never resolve the site by name. Site names can duplicate inside a single environment, so a name-based lookup can silently target the wrong site. Only `--websiteRecordId` is safe.
 - A `null` from the resolver is not a dead-end — it means either the site has not been deployed, or the PAC auth profile is pointing at a different environment than the one that owns the site. Ask the user which applies before recovering.
-- Flipping visibility restarts the site. Expect 30–60 seconds of propagation delay before the new state is reflected in the website record — do not treat an immediate "unchanged" read as a failure.
+- Flipping visibility restarts the site. Expect up to a few minutes of propagation delay before the new state is reflected in the website record — do not treat an immediate "unchanged" read as a failure.
 - A Private site depends on Entra authentication being enabled. If the user plans to disable Entra auth on the site, flip to Public first — otherwise sign-in breaks on the Private site.
 - Developer sites cannot be made Public — `D005` is an absolute block. **Even a tenant admin cannot override it.** Stop and tell the user the only path is a site in a non-developer environment.
 - Trial and other non-production sites can be blocked from Public by tenant governance policy — `A039` is conditional, not absolute. A tenant admin can adjust the governance policy to allow the flip. If the caller is not a tenant admin, surface the message and stop.
@@ -115,14 +115,15 @@ Do not retry on exit codes `4`, `5`, or `6` — those are state refusals, not tr
 
 ### Phase 5 — Verify
 
-Wait 30–60 seconds before re-checking. The flip restarts the site and the website record takes a moment to reflect the new state — re-reading immediately gives a false "unchanged" result.
+Wait 60 seconds before re-checking. The flip restarts the site and propagation typically takes a few minutes to reflect in the website record — re-reading immediately gives a false "unchanged" result.
 
 Then re-run the resolver from Phase 1 and read the `SiteVisibility` field. Confirm it matches the target.
 
-If the value has not updated:
+If the value has not updated, poll with wait-and-retry:
 
-- Wait another 30–60 seconds and re-read once.
-- If still out of sync, do not claim success. Show the user the discrepancy, ask how to proceed, and stop making changes.
+- Wait another 60–90 seconds and re-read.
+- Repeat up to 3 polls total (roughly 3–5 minutes of total wait from the original apply).
+- If still out of sync after the last poll, do not claim success. Show the user the discrepancy, ask how to proceed, and stop making changes.
 
 ### Phase 6 — Summarize and record usage
 
