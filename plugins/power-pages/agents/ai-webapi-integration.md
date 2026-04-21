@@ -196,6 +196,14 @@ Inspect the target file name and UI intent before building the URL:
 
   Pagination-strip rules apply to every list summary regardless of scope source:
 
+  - **Mirror the existing data fetch's OData query verbatim** when the target page already
+    fetches a list or filtered collection. The transformation is mechanical:
+    `/_api/<entitySet>?<query>` → `/_api/summarization/data/v1.0/<entitySet>?<query minus $top>`.
+    Copy `$select`, `$expand`, `$orderby`, `$filter`, `$count` from the existing fetch — do not
+    re-derive them. The `$filter` in particular must be preserved for parent-scoped views (e.g.,
+    a subgrid's `$filter=_<parent>_value eq <guid>`); dropping it would summarise every row in
+    the table instead of just the ones on this page. See `references/ai-api-reference.md` §2
+    "Collection endpoint for list summaries" for the two canonical transformation examples.
   - **Strip `$top`** from the summary URL. The paginated list fetch (if any) limits one UI
     page at a time; the summary needs the full row set. `Summarization/Data/ContentSizeLimit`
     (default 100000, list-summary default 200000) governs the server-side cap.

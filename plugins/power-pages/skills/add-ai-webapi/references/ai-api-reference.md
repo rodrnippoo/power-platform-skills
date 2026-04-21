@@ -397,7 +397,69 @@ Summarises a single Dataverse record (optionally with expanded related collectio
 
 When the caller wants "N rows the user can see" (e.g., a list of recent work orders for the
 signed-in contact) rather than one specific record, use the **collection** form of the URI — not
-an account-anchored record form with nested `$expand`:
+an account-anchored record form with nested `$expand`.
+
+**Rule — mirror the existing data fetch.** Whenever the target page already fetches a list or a
+filtered collection from Dataverse, the summary URL is a mechanical transformation of that
+fetch's URL. Do not re-derive `$select` / `$expand` / `$orderby` / `$filter` from scratch — copy
+them verbatim so the AI summary covers the exact rows the user is looking at.
+
+```
+Existing data fetch:   /_api/<entitySet>?<query>
+AI summary URL:        /_api/summarization/data/v1.0/<entitySet>?<query without $top>
+```
+
+And on the request: **do not** send the `Prefer: odata.maxpagesize` header that the paginated
+fetch uses. `$top` is UI pagination; the server-side cap for summarization is
+`Summarization/Data/ContentSizeLimit` (default `100000` chars). If you carry `$top=25` over, the
+AI summary silently covers only those 25 rows even though `ContentSizeLimit` would allow many
+more.
+
+**Example 1 — plain list page (invoices list):**
+
+```
+List fetch:
+  GET /_api/crd50_invoices
+    ?$select=crd50_invoiceid,crd50_name,crd50_amount,crd50_invoicestatus,createdon
+    &$expand=crd50_ContactId($select=contactid,fullname)
+    &$orderby=crd50_submissiondate desc
+    &$count=true
+    &$top=10
+
+Summary:
+  POST /_api/summarization/data/v1.0/crd50_invoices
+    ?$select=crd50_invoiceid,crd50_name,crd50_amount,crd50_invoicestatus,createdon
+    &$expand=crd50_ContactId($select=contactid,fullname)
+    &$orderby=crd50_submissiondate desc
+    &$count=true
+```
+
+**Example 2 — parent-filtered collection (invoice-attachments subgrid on an invoice form):**
+
+```
+Form subgrid fetch:
+  GET /_api/crd50_invoiceattachments
+    ?$select=crd50_invoiceattachmentid,crd50_name,crd50_filesize,createdon
+    &$orderby=createdon desc
+    &$count=true
+    &$top=25
+    &$filter=_crd50_invoiceid_value eq <parent-invoice-guid>
+
+Summary:
+  POST /_api/summarization/data/v1.0/crd50_invoiceattachments
+    ?$select=crd50_invoiceattachmentid,crd50_name,crd50_filesize,createdon
+    &$orderby=createdon desc
+    &$count=true
+    &$filter=_crd50_invoiceid_value eq <parent-invoice-guid>
+```
+
+The **`$filter` must be preserved** — it's what scopes the summary to this parent's attachments
+rather than every attachment in the site. Dropping it produces an unrelated summary. This is the
+main reason the transformation is mechanical (copy the query) rather than creative (re-derive
+the query): the original fetch already encodes the user's scope intent, and recomputing it from
+the page's filename or user prompt loses signal.
+
+Full URL template (what the transformation produces):
 
 ```
 POST /_api/summarization/data/v1.0/<entitySetName>?$select=...
@@ -405,7 +467,6 @@ POST /_api/summarization/data/v1.0/<entitySetName>?$select=...
   &$orderby=<col> desc
   &$count=true
   [&$filter=...]
-  [&$top=<n>]
 ```
 
 The endpoint respects table permissions, so the user only sees rows the row-level security layer

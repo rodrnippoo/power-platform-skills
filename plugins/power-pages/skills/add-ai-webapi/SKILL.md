@@ -168,10 +168,6 @@ Create all 8 phase tasks upfront via `TaskCreate` — see [Progress Tracking](#p
 
 Look for `powerpages.config.json` in the current directory or immediate subdirectories.
 
-```powershell
-Get-ChildItem -Path . -Filter "powerpages.config.json" -Recurse -Depth 1
-```
-
 **If not found**: tell the user to create a site first with `/create-site`.
 
 ### 1.3 Detect framework
@@ -431,7 +427,7 @@ detail, product detail, the case-page preset) skip this question.
 
 | Question | Header | Options |
 |----------|--------|---------|
-| Should this list summary fire automatically when the page loads, or only when the user clicks a button? | Trigger | Auto on mount (Recommended when the list is short and the extra API call won't slow the page noticeably), Manual via button (Recommended when the list is large or filters change frequently) |
+| Should the summary appear automatically when the page opens, or only when the user clicks a button? | Trigger | Load the summary when the page opens (Recommended when the list is short and the extra API call won't slow the page noticeably), Load only when the user clicks a button (Recommended when the list is large or filters change frequently) |
 
 Both options produce the same hook/composable surface (`refresh`, `summariseWithRecommendation`)
 — only the initial state of the wrapper differs. Record the choice per target and pass it to the
