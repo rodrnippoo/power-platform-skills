@@ -43,6 +43,7 @@ If the tracking script creates or updates site setting YAML files, include those
 | site-visibility | SiteVisibility | Site/AI/Skills/SiteVisibility |
 | web-application-firewall | WebApplicationFirewall | Site/AI/Skills/WebApplicationFirewall |
 | security-scan | SecurityScan | Site/AI/Skills/SecurityScan |
+| security-headers | SecurityHeaders | Site/AI/Skills/SecurityHeaders |
 
 ## YAML Format
 
