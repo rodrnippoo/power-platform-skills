@@ -2,12 +2,9 @@
 
 Per-command spec for the single command shipped with this skill. `SKILL.md` decides when to call it; this file is how to invoke it.
 
-Cross-skill conventions (prerequisites, portal id resolution, JSON output, exit-code semantics, full shared error-code catalogue) live in `${CLAUDE_PLUGIN_ROOT}/references/admin-script-conventions.md`. Read that first if you have not already.
-
 ## Contents
 
 - [Set site visibility](#set-site-visibility)
-- [Errors this skill's command may surface](#errors-this-skills-command-may-surface)
 
 ## Set site visibility
 
@@ -63,7 +60,3 @@ Skills branch on the exit code and fall back to parsing the stderr message only 
 | `D005` | Developer site — cannot be made Public; not overridable by any admin |
 
 Transport-level failures (`HTTP 4xx` or `HTTP 5xx` without a catalogued code) are surfaced verbatim in the stderr message. Transient `401 / 429 / 5xx` classes are already retried internally — by the time the command exits non-zero for one of them, retry has already failed.
-
-## Errors this skill's command may surface
-
-Full condition descriptions and recovery guidance for every code above live in `${CLAUDE_PLUGIN_ROOT}/references/admin-script-conventions.md#shared-error-code-catalogue`. Do not duplicate them here — if a new code appears, add it to the shared catalogue and reference it from the table above.
