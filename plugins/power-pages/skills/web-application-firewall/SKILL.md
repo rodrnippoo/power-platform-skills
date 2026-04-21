@@ -10,7 +10,7 @@ description: >-
   DDoS protection rules, false positives on legitimate traffic, or a
   user-agent ban — even if they do not use the exact phrase "Web
   Application Firewall". Out of scope: WAF log retrieval (downloaded
-  from the Power Pages admin interface under Security → Download
+  from the Power Pages Studio interface under Security → Download
   firewall logs) and any site-level IP allow-list unrelated to WAF
   rules — those belong to other skills or admin tooling.
 user-invocable: true
@@ -203,7 +203,7 @@ For the **sync operation** (`--create-rules`), the 200 response body already con
 
 3. **Remind them**:
    - Edge propagation is up to an hour.
-   - To monitor WAF activity, download logs from the Power Pages admin interface under **Security → Download firewall logs** and check the `Power Pages Log` Dataverse table filtered to Type `WAFLog`.
+   - To monitor WAF activity, download logs from the Power Pages Studio interface under **Security → Download firewall logs** and check the `Power Pages Log` Dataverse table filtered to Type `WAFLog`.
 
 > Reference: `${CLAUDE_PLUGIN_ROOT}/references/skill-tracking-reference.md`
 
