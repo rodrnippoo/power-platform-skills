@@ -42,6 +42,7 @@ If the tracking script creates or updates site setting YAML files, include those
 | integrate-backend | IntegrateBackend | Site/AI/Skills/IntegrateBackend |
 | site-visibility | SiteVisibility | Site/AI/Skills/SiteVisibility |
 | web-application-firewall | WebApplicationFirewall | Site/AI/Skills/WebApplicationFirewall |
+| security-scan | SecurityScan | Site/AI/Skills/SecurityScan |
 
 ## YAML Format
 
