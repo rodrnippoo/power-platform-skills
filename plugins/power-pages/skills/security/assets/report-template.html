@@ -1,167 +1,314 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Power Pages security review</title>
-  <style>
-    :root {
-      color-scheme: light dark;
-      --fg: #1a1a1a;
-      --fg-muted: #555;
-      --bg: #fafafa;
-      --card-bg: #ffffff;
-      --border: #e3e3e3;
-      --sev-critical-bg: #d63e2f;
-      --sev-critical-fg: #ffffff;
-      --sev-high-bg: #e67e22;
-      --sev-high-fg: #ffffff;
-      --sev-medium-bg: #f1c40f;
-      --sev-medium-fg: #1a1a1a;
-      --sev-passing-bg: #27ae60;
-      --sev-passing-fg: #ffffff;
-      --accent: #2563eb;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --fg: #e6e6e6;
-        --fg-muted: #a0a0a0;
-        --bg: #1a1a1a;
-        --card-bg: #242424;
-        --border: #333;
-      }
-    }
-    * { box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: var(--fg);
-      background: var(--bg);
-      margin: 0;
-      line-height: 1.5;
-    }
-    .page { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
-    header.top { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
-    header.top h1 { margin: 0 0 0.5rem; font-size: 1.75rem; }
-    header.top p { margin: 0; color: var(--fg-muted); }
-    dl.metadata {
-      display: grid;
-      grid-template-columns: max-content 1fr;
-      gap: 0.25rem 1rem;
-      margin: 1rem 0 0;
-      padding: 0;
-    }
-    dl.metadata dt { font-weight: 600; color: var(--fg-muted); }
-    dl.metadata dd { margin: 0; }
-    code { background: var(--card-bg); padding: 0.1rem 0.3rem; border-radius: 3px; border: 1px solid var(--border); font-size: 0.9em; }
-    .summary {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1.25rem 1.5rem;
-      margin-bottom: 2rem;
-    }
-    .summary-total { font-size: 1.1rem; margin-bottom: 1rem; }
-    .summary-block { margin-top: 1rem; }
-    .summary-block h3 { margin: 0 0 0.5rem; font-size: 1rem; color: var(--fg-muted); }
-    ul.severity-list, ul.category-list, ul.permissions-summary {
-      list-style: none; padding: 0; margin: 0;
-      display: flex; flex-wrap: wrap; gap: 0.5rem;
-    }
-    ul.severity-list li, ul.category-list li, ul.permissions-summary li {
-      display: inline-flex; align-items: baseline; gap: 0.35rem;
-      padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: 999px;
-      background: var(--bg); font-size: 0.9rem;
-    }
-    .count { font-weight: 700; font-size: 1rem; }
-    .sev-critical .count, li.sev-critical .count { color: var(--sev-critical-bg); }
-    .sev-high .count, li.sev-high .count { color: var(--sev-high-bg); }
-    .sev-medium .count, li.sev-medium .count { color: var(--sev-medium-bg); }
-    .sev-passing .count, li.sev-passing .count { color: var(--sev-passing-bg); }
-    aside.pending-scans {
-      background: #fff8e1;
-      border: 1px solid #f1c40f;
-      color: #4a3b00;
-      border-radius: 8px;
-      padding: 1rem 1.25rem;
-      margin-bottom: 2rem;
-    }
-    @media (prefers-color-scheme: dark) {
-      aside.pending-scans { background: #3a2e00; color: #ffeaa0; border-color: #b89400; }
-    }
-    aside.pending-scans h3 { margin: 0 0 0.5rem; font-size: 1rem; }
-    aside.pending-scans ul { margin: 0.5rem 0 0; padding-left: 1.25rem; }
-    section.category {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1.25rem 1.5rem;
-      margin-bottom: 1.5rem;
-    }
-    section.category > h3 { margin-top: 0; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
-    article.finding {
-      border-left: 4px solid var(--border);
-      padding: 0.75rem 1rem;
-      margin: 0.75rem 0;
-      background: var(--bg);
-      border-radius: 0 4px 4px 0;
-    }
-    article.finding.sev-critical { border-left-color: var(--sev-critical-bg); }
-    article.finding.sev-high { border-left-color: var(--sev-high-bg); }
-    article.finding.sev-medium { border-left-color: var(--sev-medium-bg); }
-    article.finding.sev-passing { border-left-color: var(--sev-passing-bg); }
-    article.finding header {
-      display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
-      margin-bottom: 0.5rem;
-    }
-    article.finding header h4 { margin: 0; flex: 1 1 auto; font-size: 1.05rem; }
-    .severity-badge {
-      display: inline-block; padding: 0.15rem 0.55rem; border-radius: 4px;
-      font-size: 0.75rem; font-weight: 700; letter-spacing: 0.5px;
-    }
-    .severity-badge.sev-critical { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
-    .severity-badge.sev-high { background: var(--sev-high-bg); color: var(--sev-high-fg); }
-    .severity-badge.sev-medium { background: var(--sev-medium-bg); color: var(--sev-medium-fg); }
-    .severity-badge.sev-passing { background: var(--sev-passing-bg); color: var(--sev-passing-fg); }
-    .status {
-      display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px;
-      font-size: 0.8rem; border: 1px solid var(--border); color: var(--fg-muted);
-    }
-    .status-fixed { background: #d4edda; border-color: #c3e6cb; color: #155724; }
-    .status-skipped { background: #f5f5f5; border-color: #ccc; color: #777; text-decoration: line-through; }
-    .status-deferred { background: #fff3cd; border-color: #ffeeba; color: #856404; }
-    .source, .evidence, .remediation, .before-after { margin-top: 0.35rem; font-size: 0.95rem; color: var(--fg); }
-    .source em { color: var(--fg-muted); font-style: normal; font-weight: 600; }
-    .delegate code { background: transparent; border: none; padding: 0; color: var(--accent); }
-    .before-after { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem; }
-    section.permissions-audit {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1.25rem 1.5rem;
-      margin-bottom: 1.5rem;
-    }
-    section.permissions-audit h3 { margin-top: 0; }
-    section.permissions-audit .note { color: var(--fg-muted); font-size: 0.9rem; margin-top: 0.5rem; }
-    a { color: var(--accent); }
-    p.empty { color: var(--fg-muted); font-style: italic; }
-  </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Security Review — __SITE_NAME__</title>
+<style>
+:root {
+  --bg:#faf9f8; --surface:#ffffff; --surface2:#f3f2f1; --surface3:#edebe9;
+  --border:#e1dfdd; --border-light:#c8c6c4;
+  --text:#323130; --text-dim:#605e5c; --text-bright:#201f1e;
+  --accent:#0078d4; --accent-bg:#0078d40a; --accent-border:#0078d425;
+  --critical:#d13438; --critical-bg:#d134380a; --critical-border:#d1343825;
+  --high:#ca5010; --high-bg:#ca50100a; --high-border:#ca501025;
+  --medium:#0078d4; --medium-bg:#0078d40a; --medium-border:#0078d425;
+  --passing:#107c10; --passing-bg:#107c100a; --passing-border:#107c1025;
+  --purple:#8764b8; --purple-bg:#8764b80a; --purple-border:#8764b825;
+  --mono:'Cascadia Code','Consolas',monospace;
+  --sans:'Segoe UI','Segoe UI Web (West European)',-apple-system,system-ui,sans-serif;
+  --radius:8px; --radius-sm:4px;
+  --shadow-4:0 1.6px 3.6px 0 rgba(0,0,0,0.132),0 0.3px 0.9px 0 rgba(0,0,0,0.108);
+  --shadow-8:0 3.2px 7.2px 0 rgba(0,0,0,0.132),0 0.6px 1.8px 0 rgba(0,0,0,0.108);
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14px;line-height:1.6;}
+
+/* Top Bar */
+.topbar{z-index:100;background:var(--surface);box-shadow:var(--shadow-4);padding:14px 28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;}
+.topbar-left{display:flex;align-items:center;gap:14px;}
+.logo{width:36px;height:36px;border-radius:var(--radius);background:linear-gradient(135deg,#0078d4,#5c2d91);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;font-family:var(--mono);letter-spacing:-0.5px;}
+.topbar-title{font-size:16px;font-weight:700;color:var(--text-bright);}
+.topbar-sub{font-size:11px;color:var(--text-dim);margin-top:1px;}
+
+/* Layout */
+.layout{display:flex;min-height:calc(100vh - 61px);}
+
+/* Sidebar */
+.sidebar{width:220px;background:var(--surface);border-right:1px solid var(--border);padding:20px 0;flex-shrink:0;}
+.nav-btn{display:flex;align-items:center;gap:10px;width:100%;padding:11px 22px;background:none;border:none;border-left:2px solid transparent;color:var(--text-dim);font-size:13px;font-weight:500;cursor:pointer;font-family:var(--sans);text-align:left;transition:all 0.15s;position:relative;}
+.nav-btn:hover{color:var(--text);background:var(--surface2);}
+.nav-btn.active{color:var(--accent);font-weight:600;border-left-color:var(--accent);background:var(--accent-bg);}
+.nav-btn .nav-icon{font-size:15px;opacity:0.5;width:18px;text-align:center;}
+.nav-btn.active .nav-icon{opacity:0.9;}
+.nav-badge{position:absolute;right:14px;font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:8px;font-weight:700;}
+
+/* Content */
+.content{flex:1;padding:32px 40px;max-width:1000px;}
+.section{display:none;}
+.section.active{display:block;animation:fadeIn 0.3s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+h2{font-size:21px;font-weight:800;color:var(--text-bright);letter-spacing:-0.3px;margin-bottom:5px;}
+.section-desc{font-size:13px;color:var(--text-dim);margin-bottom:20px;}
+h3{font-size:15px;font-weight:700;color:var(--text-bright);margin-top:24px;margin-bottom:12px;}
+
+/* Cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin-bottom:10px;transition:box-shadow 0.2s;}
+.card:hover{box-shadow:var(--shadow-4);}
+
+/* Stats Grid */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:24px;}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 16px;text-align:center;position:relative;overflow:hidden;box-shadow:var(--shadow-4);}
+.stat-num{font-size:28px;font-weight:800;font-family:var(--mono);line-height:1;}
+.stat-label{font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-top:6px;}
+
+/* Severity badges */
+.severity{font-size:9px;font-weight:700;padding:3px 8px;border-radius:3px;font-family:var(--mono);display:inline-block;text-transform:uppercase;letter-spacing:0.5px;}
+.severity-critical{color:var(--critical);background:var(--critical-bg);border:1px solid var(--critical-border);}
+.severity-high{color:var(--high);background:var(--high-bg);border:1px solid var(--high-border);}
+.severity-medium{color:var(--medium);background:var(--medium-bg);border:1px solid var(--medium-border);}
+.severity-passing{color:var(--passing);background:var(--passing-bg);border:1px solid var(--passing-border);}
+
+/* Finding cards */
+.category-block{margin-bottom:22px;}
+.category-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.category-head h3{margin:0;}
+.category-count{font-size:11px;font-family:var(--mono);color:var(--text-dim);background:var(--surface2);padding:1px 7px;border-radius:8px;}
+.finding-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px;transition:box-shadow 0.2s;overflow:hidden;}
+.finding-card:hover{box-shadow:var(--shadow-4);}
+.finding-header{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;cursor:pointer;-webkit-user-select:none;user-select:none;}
+.finding-header:hover{background:var(--surface2);}
+.finding-title{font-size:14px;font-weight:600;color:var(--text-bright);flex:1;}
+.finding-source{font-size:11px;color:var(--accent);background:var(--accent-bg);padding:1px 6px;border-radius:3px;border:1px solid var(--accent-border);font-family:var(--mono);}
+.finding-status{font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;font-family:var(--mono);text-transform:uppercase;letter-spacing:0.5px;}
+.finding-status-open{color:var(--text-dim);background:var(--surface2);border:1px solid var(--border);}
+.finding-status-fixed{color:var(--passing);background:var(--passing-bg);border:1px solid var(--passing-border);}
+.finding-status-deferred{color:var(--high);background:var(--high-bg);border:1px solid var(--high-border);}
+.finding-status-skipped{color:var(--text-dim);background:var(--surface2);border:1px solid var(--border);text-decoration:line-through;}
+.finding-chevron{color:var(--text-dim);font-size:12px;transition:transform 0.2s;flex-shrink:0;margin-top:3px;}
+.finding-card.expanded .finding-chevron{transform:rotate(90deg);}
+.finding-body{display:none;padding:0 18px 16px;border-top:1px solid var(--border);}
+.finding-card.expanded .finding-body{display:block;animation:fadeIn 0.2s ease;}
+
+/* Field label */
+.field-label{font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;}
+
+/* Evidence & remediation blocks */
+.evidence-block{background:var(--surface2);border-left:2px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;margin-top:10px;font-size:12px;color:var(--text);line-height:1.7;}
+.remediation-block{background:var(--passing-bg);border-left:2px solid var(--passing);border-radius:var(--radius-sm);padding:10px 14px;margin-top:8px;font-size:12px;color:var(--text);line-height:1.7;}
+.remediation-block strong{color:var(--passing);}
+.remediation-block code{font-size:11px;color:var(--accent);background:var(--accent-bg);padding:1px 5px;border-radius:3px;border:1px solid var(--accent-border);font-family:var(--mono);}
+.before-after{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;font-size:12px;}
+.before-after .label{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;}
+.before-after code{display:block;padding:6px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--mono);font-size:11px;overflow-x:auto;}
+
+/* Metadata */
+.metadata-dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;font-size:13px;}
+.metadata-dl dt{font-weight:600;color:var(--text-dim);}
+.metadata-dl dd{color:var(--text-bright);}
+.metadata-dl code{font-size:12px;color:var(--accent);background:var(--accent-bg);padding:1px 5px;border-radius:3px;border:1px solid var(--accent-border);font-family:var(--mono);}
+
+/* Filter buttons */
+.filter-bar{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;}
+.filter-btn{padding:5px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text-dim);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:all 0.15s;}
+.filter-btn:hover{border-color:var(--border-light);color:var(--text);}
+.filter-btn.active{background:var(--accent-bg);border-color:var(--accent-border);color:var(--accent);}
+.filter-count{font-family:var(--mono);font-size:10px;margin-left:4px;opacity:0.7;}
+
+/* Pending scans banner */
+.pending-banner{background:var(--high-bg);border:1px solid var(--high-border);border-radius:var(--radius);padding:14px 18px;margin-bottom:20px;}
+.pending-banner h4{font-size:13px;font-weight:700;color:var(--high);margin-bottom:6px;}
+.pending-banner ul{margin:0;padding-left:18px;font-size:12px;color:var(--text);}
+.pending-banner code{font-family:var(--mono);font-size:11px;color:var(--accent);background:var(--accent-bg);padding:1px 5px;border-radius:3px;border:1px solid var(--accent-border);}
+
+/* Permissions link-back */
+.permissions-link{background:var(--accent-bg);border:1px solid var(--accent-border);border-radius:var(--radius-sm);padding:10px 14px;margin:10px 0 14px;font-size:13px;}
+.permissions-link a{color:var(--accent);text-decoration:none;font-weight:600;}
+.permissions-link a:hover{text-decoration:underline;}
+
+/* Empty state */
+.empty-state{text-align:center;padding:40px;color:var(--text-dim);font-size:14px;}
+
+/* Responsive */
+@media(max-width:768px){
+  .sidebar{display:none;}
+  .content{padding:20px 16px;}
+  .stats-grid{grid-template-columns:repeat(2,1fr);}
+  .before-after{grid-template-columns:1fr;}
+}
+</style>
 </head>
 <body>
-  <div class="page">
-    <header class="top">
-      <h1>Power Pages security review</h1>
-      <p>Framework-driven review of the site's current security posture, aggregated from every security-related area (site visibility, web application firewall, HTTP headers, dynamic scan, code analysis) plus the existing table-permissions audit. Findings are organized by category; remediations route to the area that owns the fix.</p>
-      __METADATA__
-    </header>
 
-    __SUMMARY__
-
-    __PENDING_SCANS__
-
-    <h2>Findings by category</h2>
-    __CATEGORIES__
-
-    __PERMISSIONS_AUDIT__
+<div id="mainApp">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="logo">PP</div>
+      <div>
+        <div class="topbar-title">Security Review</div>
+        <div class="topbar-sub">__SITE_NAME__</div>
+      </div>
+    </div>
   </div>
+
+  <div class="layout">
+    <div class="sidebar">
+      <button class="nav-btn active" data-tab="overview"><span class="nav-icon">&#9673;</span> Overview</button>
+      <button class="nav-btn" data-tab="findings"><span class="nav-icon">&#9888;</span> Findings
+        <span class="nav-badge" id="navFindingsCount" style="background:var(--critical-bg);color:var(--critical);"></span>
+      </button>
+      <button class="nav-btn" data-tab="permissions"><span class="nav-icon">&#9638;</span> Table Permissions</button>
+      <button class="nav-btn" data-tab="pending"><span class="nav-icon">&#8634;</span> Pending Scans
+        <span class="nav-badge" id="navPendingCount" style="background:var(--high-bg);color:var(--high);"></span>
+      </button>
+    </div>
+
+    <div class="content">
+
+      <!-- OVERVIEW -->
+      <div class="section active" id="tab-overview">
+        <h2>Security Review Overview</h2>
+        <p class="section-desc">Framework-driven review of the site's current security posture, aggregated from every security-related area — site visibility, web application firewall, HTTP headers, dynamic scan, code analysis — plus the existing table-permissions audit. Remediations route to the skill that owns each concern.</p>
+
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-num" style="color:var(--critical)" id="statCritical">0</div><div class="stat-label">Critical</div></div>
+          <div class="stat-card"><div class="stat-num" style="color:var(--high)" id="statHigh">0</div><div class="stat-label">High</div></div>
+          <div class="stat-card"><div class="stat-num" style="color:var(--medium)" id="statMedium">0</div><div class="stat-label">Medium</div></div>
+          <div class="stat-card"><div class="stat-num" style="color:var(--passing)" id="statPassing">0</div><div class="stat-label">Passing</div></div>
+        </div>
+
+        <h3>Context</h3>
+        <div class="card">__METADATA__</div>
+
+        <h3>Summary</h3>
+        <div class="card">__SUMMARY__</div>
+      </div>
+
+      <!-- FINDINGS -->
+      <div class="section" id="tab-findings">
+        <h2>Findings</h2>
+        <p class="section-desc" id="findingsDesc"></p>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div class="filter-bar" id="filterBar" style="margin-bottom:0;"></div>
+          <button class="filter-btn" id="expandAllBtn" onclick="toggleExpandAll()" style="white-space:nowrap;">Expand All</button>
+        </div>
+        <div id="findingsContainer" style="margin-top:16px;">
+          __CATEGORIES__
+        </div>
+      </div>
+
+      <!-- PERMISSIONS -->
+      <div class="section" id="tab-permissions">
+        <h2>Table Permissions</h2>
+        <p class="section-desc">Findings from the <code>/audit-permissions</code> skill, re-rendered under the unified Critical / High / Medium / Passing scheme.</p>
+        __PERMISSIONS_AUDIT__
+      </div>
+
+      <!-- PENDING -->
+      <div class="section" id="tab-pending">
+        <h2>Pending Scans</h2>
+        <p class="section-desc">Long-running scans still in progress. Their findings will be appended to this report once they complete.</p>
+        __PENDING_SCANS__
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+// Data populated by render-report.js — severity counts drive the nav badges
+// and the stat cards. Counts are zero-filled when no findings of that
+// severity are present, so every stat card always renders.
+const SEVERITY_COUNTS = __SEVERITY_COUNTS_JSON__;
+const PENDING_COUNT = __PENDING_COUNT__;
+
+// Tab navigation
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// Finding expand/collapse
+document.querySelectorAll('.finding-card .finding-header').forEach(h => {
+  h.addEventListener('click', () => {
+    h.closest('.finding-card').classList.toggle('expanded');
+  });
+});
+
+// Stats + badges
+const criticalCount = SEVERITY_COUNTS.critical || 0;
+const highCount = SEVERITY_COUNTS.high || 0;
+const mediumCount = SEVERITY_COUNTS.medium || 0;
+const passingCount = SEVERITY_COUNTS.passing || 0;
+const issueCount = criticalCount + highCount + mediumCount;
+
+document.getElementById('statCritical').textContent = criticalCount;
+document.getElementById('statHigh').textContent = highCount;
+document.getElementById('statMedium').textContent = mediumCount;
+document.getElementById('statPassing').textContent = passingCount;
+document.getElementById('navFindingsCount').textContent = issueCount > 0 ? issueCount : '';
+document.getElementById('navPendingCount').textContent = PENDING_COUNT > 0 ? PENDING_COUNT : '';
+
+document.getElementById('findingsDesc').textContent =
+  (criticalCount + highCount + mediumCount + passingCount) +
+  ' finding' + ((criticalCount + highCount + mediumCount + passingCount) !== 1 ? 's' : '') +
+  ' — ' + criticalCount + ' critical, ' + highCount + ' high, ' +
+  mediumCount + ' medium, ' + passingCount + ' passing.';
+
+// Filter bar
+let activeFilter = 'all';
+function renderFilterBar() {
+  const c = document.getElementById('filterBar');
+  const total = criticalCount + highCount + mediumCount + passingCount;
+  const counts = { all: total, critical: criticalCount, high: highCount, medium: mediumCount, passing: passingCount };
+  const labels = { all: 'All', critical: 'Critical', high: 'High', medium: 'Medium', passing: 'Passing' };
+  let html = '';
+  Object.entries(labels).forEach(([key, label]) => {
+    if (counts[key] === 0 && key !== 'all') return;
+    html += `<button class="filter-btn ${activeFilter === key ? 'active' : ''}" onclick="setFilter('${key}')">${label}<span class="filter-count">${counts[key]}</span></button>`;
+  });
+  c.innerHTML = html;
+}
+function setFilter(f) {
+  activeFilter = f;
+  renderFilterBar();
+  applyFilter();
+}
+function applyFilter() {
+  document.querySelectorAll('.finding-card').forEach(card => {
+    if (activeFilter === 'all') {
+      card.style.display = '';
+      return;
+    }
+    const matches = card.classList.contains('filter-' + activeFilter);
+    card.style.display = matches ? '' : 'none';
+  });
+  // Hide empty category blocks
+  document.querySelectorAll('.category-block').forEach(block => {
+    const visibleCards = block.querySelectorAll('.finding-card:not([style*="display: none"])');
+    block.style.display = visibleCards.length > 0 ? '' : 'none';
+  });
+}
+
+// Expand/Collapse All
+let allExpanded = false;
+function toggleExpandAll() {
+  allExpanded = !allExpanded;
+  document.querySelectorAll('.finding-card').forEach(c => {
+    if (allExpanded) c.classList.add('expanded');
+    else c.classList.remove('expanded');
+  });
+  document.getElementById('expandAllBtn').textContent = allExpanded ? 'Collapse All' : 'Expand All';
+}
+
+renderFilterBar();
+</script>
+<footer style="position:fixed;bottom:0;left:0;right:0;text-align:center;padding:10px;font-size:12px;color:#605e5c;border-top:1px solid #c8c6c4;background:#ffffff;z-index:100;">AI-generated content may be incorrect</footer>
 </body>
 </html>

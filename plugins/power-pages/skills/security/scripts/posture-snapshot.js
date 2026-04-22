@@ -20,9 +20,15 @@
 //   node posture-snapshot.js --portalId <guid> --projectRoot <path>
 //   node posture-snapshot.js --help
 
+const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { parseArgs } = require('node:util');
+
+const {
+  WEB_ROLE_FILE_SUFFIX,
+  loadYamlRecordsWithErrors,
+} = require('../../../scripts/lib/powerpages-config');
 
 const EXIT = Object.freeze({
   OK: 0,
@@ -61,6 +67,11 @@ Output (stdout): a JSON object with fields:
   scan.score    — { totalRules, succeededRules } (or null)
   headers.audit — present / missing / forbidden HTTP/* site-settings
   languages     — CodeQL-supported languages detected in the project
+  webRoles      — local web-role definitions read from
+                  <projectRoot>/.powerpages-site/web-roles/*.webrole.yml,
+                  shaped as { present, count, roles[] } or { error }.
+                  "Absent on a Private site" is a load-bearing signal the
+                  meta-skill uses to flag OWASP A01 findings.
 
 Exit codes:
   0  Success — every read completed (some may contain { error } fields).
@@ -138,6 +149,40 @@ function languagesScriptPath() {
   return path.join(PLUGIN_ROOT, 'skills', 'code-analysis', 'scripts', 'detect-languages.js');
 }
 
+/**
+ * Read local web-role definitions from the project's `.powerpages-site/web-roles/`
+ * directory. This is a file-based read (no network, no Dataverse) because code
+ * sites persist web-role YAML alongside site-settings and table-permissions.
+ *
+ * Returns:
+ *   { present: false, count: 0, roles: [] } — directory missing or empty
+ *                                              (common on a freshly scaffolded
+ *                                              site that has never deployed)
+ *   { present: true,  count: N, roles: [...] } — each role as a parsed YAML
+ *                                                  record from powerpages-config
+ *   { error: "..." } — any unexpected failure; stays consistent with the
+ *                      fail-open pattern the other reads use
+ *
+ * Shape is intentionally minimal — the meta-skill cross-references with
+ * `website.SiteVisibility` in Phase 4; absence of web roles on a Private
+ * site is the load-bearing OWASP A01 signal this read exists to surface.
+ */
+function readLocalWebRoles(projectRoot) {
+  try {
+    const rolesDir = path.join(projectRoot, '.powerpages-site', 'web-roles');
+    if (!fs.existsSync(rolesDir)) {
+      return { present: false, count: 0, roles: [] };
+    }
+    const { records, errors } = loadYamlRecordsWithErrors(rolesDir, WEB_ROLE_FILE_SUFFIX);
+    if (errors.length > 0) {
+      return { error: `web-role parse failures: ${errors[0].message}` };
+    }
+    return { present: true, count: records.length, roles: records };
+  } catch (err) {
+    return { error: `web-role read failed: ${err.message}` };
+  }
+}
+
 async function runSnapshot({ portalId, projectRoot } = {}) {
   if (!portalId || typeof portalId !== 'string') {
     throw invalidArgs('--portalId is required');
@@ -176,12 +221,17 @@ async function runSnapshot({ portalId, projectRoot } = {}) {
     runNodeScript(languagesScriptPath(), ['--projectRoot', projectRoot]),
   ]);
 
+  // Web-role read is synchronous and file-based; run it inline rather than
+  // adding a child-process hop for a directory walk + YAML parse.
+  const webRolesResult = readLocalWebRoles(projectRoot);
+
   return {
     website: websiteResult,
     waf: { status: wafStatusResult, rules: wafRulesResult },
     scan: { ongoing: scanOngoingResult, report: scanReportResult, score: scanScoreResult },
     headers: { audit: headersAuditResult },
     languages: languagesResult,
+    webRoles: webRolesResult,
   };
 }
 

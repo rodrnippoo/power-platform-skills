@@ -76,109 +76,174 @@ function escapeHtml(value) {
 
 function renderSummary(findings) {
   const s = findings.summary || {};
-  const bs = s.bySeverity || {};
   const bc = s.byCategory || {};
-  const severityRow = ['critical', 'high', 'medium', 'passing']
-    .map((sev) => `<li class="sev-${sev}"><span class="count">${escapeHtml(bs[sev] ?? 0)}</span> <span class="label">${escapeHtml(sev[0].toUpperCase() + sev.slice(1))}</span></li>`)
-    .join('\n');
   const categoryRows = Object.entries(bc)
-    .map(([cat, count]) => `<li><span class="count">${escapeHtml(count)}</span> <span class="label">${escapeHtml(cat)}</span></li>`)
-    .join('\n');
+    .map(([cat, count]) => `<li style="display:inline-block;padding:4px 10px;margin:2px 4px 2px 0;background:var(--surface2);border:1px solid var(--border);border-radius:12px;font-size:12px;"><strong style="font-family:var(--mono);color:var(--text-bright);">${escapeHtml(count)}</strong> <span style="color:var(--text-dim);">${escapeHtml(cat)}</span></li>`)
+    .join('');
+  const total = s.totalFindings ?? 0;
+  const byCat = Object.keys(bc).length
+    ? `<div style="margin-top:10px;"><div class="field-label">By category</div><ul style="list-style:none;padding:0;margin:6px 0 0;">${categoryRows}</ul></div>`
+    : '';
   return `
-    <div class="summary">
-      <div class="summary-total">Total findings: <strong>${escapeHtml(s.totalFindings ?? 0)}</strong></div>
-      <div class="summary-block">
-        <h3>By severity</h3>
-        <ul class="severity-list">${severityRow}</ul>
+    <div style="font-size:13px;line-height:1.75;">
+      <div>Total findings: <strong style="color:var(--text-bright);">${escapeHtml(total)}</strong></div>
+      ${byCat}
+    </div>
+  `.trim();
+}
+
+// Count findings by severity across every category. Used to populate the
+// stat cards and nav badges in the template. Zero-fills every level so the
+// template's JS always has numeric values to render.
+function countBySeverity(findings) {
+  const counts = { critical: 0, high: 0, medium: 0, passing: 0 };
+  const cats = findings.categories || [];
+  for (const cat of cats) {
+    for (const f of cat.findings || []) {
+      const sev = (f.severity || 'medium').toLowerCase();
+      if (counts[sev] !== undefined) counts[sev] += 1;
+    }
+  }
+  // If the findings JSON already carries pre-computed counts, prefer them
+  // so callers can override (e.g., when including audit-permissions findings
+  // that were bucketed upstream).
+  const bs = findings.summary?.bySeverity;
+  if (bs && typeof bs === 'object') {
+    for (const k of ['critical', 'high', 'medium', 'passing']) {
+      if (typeof bs[k] === 'number') counts[k] = bs[k];
+    }
+  }
+  return counts;
+}
+
+function renderFinding(f) {
+  const rem = f.remediation || {};
+  const sev = (f.severity || 'medium').toLowerCase();
+  const sevLabel = sev[0].toUpperCase() + sev.slice(1);
+  const status = (rem.appliedStatus || 'open').toLowerCase();
+  const statusLabel = status[0].toUpperCase() + status.slice(1);
+  const beforeAfter = (rem.beforeValue != null || rem.afterValue != null)
+    ? `
+      <div class="before-after">
+        <div>
+          <div class="label">Before</div>
+          <code>${escapeHtml(JSON.stringify(rem.beforeValue ?? null))}</code>
+        </div>
+        <div>
+          <div class="label">After</div>
+          <code>${escapeHtml(JSON.stringify(rem.afterValue ?? null))}</code>
+        </div>
+      </div>`
+    : '';
+  const delegatePill = rem.delegateTo
+    ? ` <code>${escapeHtml(rem.delegateTo)}</code>`
+    : '';
+  return `
+    <div class="finding-card filter-${escapeHtml(sev)}">
+      <div class="finding-header">
+        <span class="severity severity-${escapeHtml(sev)}">${escapeHtml(sevLabel)}</span>
+        <span class="finding-title">${escapeHtml(f.title || '(untitled finding)')}</span>
+        ${f.source ? `<span class="finding-source">${escapeHtml(f.source)}</span>` : ''}
+        <span class="finding-status finding-status-${escapeHtml(status)}">${escapeHtml(statusLabel)}</span>
+        <span class="finding-chevron">&#9654;</span>
       </div>
-      <div class="summary-block">
-        <h3>By category</h3>
-        <ul class="category-list">${categoryRows}</ul>
+      <div class="finding-body">
+        ${f.evidence ? `<div style="margin-top:10px;"><div class="field-label">Evidence</div><div class="evidence-block">${escapeHtml(f.evidence)}</div></div>` : ''}
+        ${rem.description ? `<div style="margin-top:10px;"><div class="field-label">Suggested remediation</div><div class="remediation-block"><strong>Fix:</strong> ${escapeHtml(rem.description)}${delegatePill ? ` (via${delegatePill})` : ''}</div></div>` : ''}
+        ${beforeAfter}
       </div>
     </div>
   `.trim();
 }
 
-function renderFinding(f) {
-  const rem = f.remediation || {};
-  const statusLabel = escapeHtml(rem.appliedStatus || 'open');
-  const beforeAfter = (rem.beforeValue != null || rem.afterValue != null)
-    ? `
-      <div class="before-after">
-        <div><strong>Before:</strong> <code>${escapeHtml(JSON.stringify(rem.beforeValue ?? null))}</code></div>
-        <div><strong>After:</strong> <code>${escapeHtml(JSON.stringify(rem.afterValue ?? null))}</code></div>
-      </div>`
-    : '';
-  return `
-    <article class="finding sev-${escapeHtml(f.severity || 'medium')}">
-      <header>
-        <span class="severity-badge sev-${escapeHtml(f.severity || 'medium')}">${escapeHtml((f.severity || 'medium').toUpperCase())}</span>
-        <h4>${escapeHtml(f.title || '(untitled finding)')}</h4>
-        <span class="status status-${statusLabel}">${statusLabel}</span>
-      </header>
-      <div class="source"><em>Source:</em> ${escapeHtml(f.source || 'unknown')}</div>
-      <div class="evidence"><strong>Evidence:</strong> ${escapeHtml(f.evidence || '')}</div>
-      <div class="remediation"><strong>Remediation:</strong> ${escapeHtml(rem.description || '')}${rem.delegateTo ? ` <span class="delegate">(via <code>${escapeHtml(rem.delegateTo)}</code>)</span>` : ''}</div>
-      ${beforeAfter}
-    </article>
-  `.trim();
-}
-
 function renderCategories(findings) {
   const cats = findings.categories || [];
-  if (cats.length === 0) return '<p class="empty">No category findings recorded.</p>';
-  return cats.map((cat) => `
-    <section class="category">
-      <h3>${escapeHtml(cat.name || cat.id || '(unnamed)')}</h3>
-      <div class="findings-list">
-        ${(cat.findings || []).map(renderFinding).join('\n')}
+  if (cats.length === 0) return '<div class="empty-state">No findings recorded.</div>';
+  return cats.map((cat) => {
+    const items = (cat.findings || []);
+    return `
+    <div class="category-block">
+      <div class="category-head">
+        <h3>${escapeHtml(cat.name || cat.id || '(unnamed)')}</h3>
+        <span class="category-count">${escapeHtml(items.length)} finding${items.length === 1 ? '' : 's'}</span>
       </div>
-    </section>
-  `.trim()).join('\n');
+      ${items.length === 0 ? '<div class="empty-state" style="padding:20px;">No findings in this category.</div>' : items.map(renderFinding).join('\n')}
+    </div>
+  `.trim();
+  }).join('\n');
 }
 
 function renderPermissionsAudit(findings) {
   const pa = findings.permissionsAudit;
-  if (!pa) return '';
+  if (!pa) {
+    return '<div class="empty-state">The table-permissions audit was not included in this review.</div>';
+  }
   const s = pa.summary || {};
+  const reportPath = pa.reportPath || 'docs/permissions-audit.html';
+  // Map audit-permissions' severity scheme (critical/warning/info/pass) to
+  // the security skill's unified scheme (critical/high/medium/passing). The
+  // mapping matches the one documented in references/orchestration.md
+  // (§Severity scheme) — audit-permissions findings are preserved verbatim
+  // under the unified labels so users see one scheme across the report.
+  const critical = s.critical ?? 0;
+  const high = s.warning ?? 0;
+  const medium = s.info ?? 0;
+  const passing = s.pass ?? 0;
   return `
-    <section class="permissions-audit">
-      <h3>Table permissions audit</h3>
-      <p>Findings from <code>/audit-permissions</code> are included under A01 Broken Access Control. Full evidence and the original severity-grouped report remain at <a href="${escapeHtml(pa.reportPath || 'docs/permissions-audit.html')}"><code>${escapeHtml(pa.reportPath || 'docs/permissions-audit.html')}</code></a>.</p>
-      <ul class="permissions-summary">
-        <li class="sev-critical"><span class="count">${escapeHtml(s.critical ?? 0)}</span> Critical</li>
-        <li class="sev-high"><span class="count">${escapeHtml(s.warning ?? 0)}</span> Warning</li>
-        <li class="sev-medium"><span class="count">${escapeHtml(s.info ?? 0)}</span> Info</li>
-        <li class="sev-passing"><span class="count">${escapeHtml(s.pass ?? 0)}</span> Passing</li>
-      </ul>
-      ${pa.note ? `<p class="note">${escapeHtml(pa.note)}</p>` : ''}
-    </section>
+    <div class="permissions-link">
+      Full evidence and the original severity-grouped report remain at
+      <a href="${escapeHtml(reportPath)}"><code>${escapeHtml(reportPath)}</code></a>.
+      This section shows those findings re-labeled under the unified Critical / High / Medium / Passing scheme;
+      fixes still route to the <code>table-permissions-architect</code> agent via <code>/audit-permissions</code>.
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-num" style="color:var(--critical)">${escapeHtml(critical)}</div><div class="stat-label">Critical</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:var(--high)">${escapeHtml(high)}</div><div class="stat-label">High</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:var(--medium)">${escapeHtml(medium)}</div><div class="stat-label">Medium</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:var(--passing)">${escapeHtml(passing)}</div><div class="stat-label">Passing</div></div>
+    </div>
+    ${pa.note ? `<div class="card" style="font-size:13px;color:var(--text-dim);margin-top:10px;">${escapeHtml(pa.note)}</div>` : ''}
   `.trim();
 }
 
 function renderPendingScans(findings) {
   const pending = findings.metadata?.pendingScans;
-  if (!pending || pending.length === 0) return '';
-  const items = pending.map((p) => `<li>${escapeHtml(p.type || 'unknown scan')} — poll with: <code>${escapeHtml(p.pollCommand || '')}</code></li>`).join('\n');
+  if (!pending || pending.length === 0) {
+    return '<div class="empty-state">No long-running scans are pending.</div>';
+  }
+  const items = pending
+    .map((p) => `<li><strong>${escapeHtml(p.type || 'unknown scan')}</strong> — poll with <code>${escapeHtml(p.pollCommand || '(no command)')}</code></li>`)
+    .join('\n');
   return `
-    <aside class="pending-scans">
-      <h3>Additional findings pending</h3>
-      <p>Long-running scans are still in progress. Their findings will be appended to this report once they complete.</p>
+    <div class="pending-banner">
+      <h4>Additional findings pending</h4>
       <ul>${items}</ul>
-    </aside>
+    </div>
   `.trim();
 }
 
 function renderMetadata(findings) {
   const m = findings.metadata || {};
+  const scans = Array.isArray(m.scansIncluded) && m.scansIncluded.length
+    ? m.scansIncluded.join(', ')
+    : '(none)';
+  const skipped = Array.isArray(m.scansSkipped) && m.scansSkipped.length
+    ? m.scansSkipped.join(', ')
+    : '(none)';
   return `
-    <dl class="metadata">
+    <dl class="metadata-dl">
       <dt>Framework</dt><dd>${escapeHtml(m.framework || '(not recorded)')}</dd>
       <dt>Site</dt><dd>${escapeHtml(m.siteName || '(unknown)')}</dd>
       <dt>Portal id</dt><dd><code>${escapeHtml(m.portalId || '(unknown)')}</code></dd>
       <dt>Generated</dt><dd>${escapeHtml(m.generatedAt || new Date().toISOString())}</dd>
+      <dt>Scans run</dt><dd>${escapeHtml(scans)}</dd>
+      <dt>Scans skipped</dt><dd>${escapeHtml(skipped)}</dd>
     </dl>
   `.trim();
+}
+
+function siteNameFromFindings(findings) {
+  return findings.metadata?.siteName || 'Power Pages site';
 }
 
 function render({ findingsPath, outputPath } = {}) {
@@ -205,12 +270,22 @@ function render({ findingsPath, outputPath } = {}) {
   }
   const template = fs.readFileSync(TEMPLATE_PATH, 'utf8');
 
+  const severityCounts = countBySeverity(findings);
+  const pendingCount = Array.isArray(findings.metadata?.pendingScans)
+    ? findings.metadata.pendingScans.length
+    : 0;
   const tokens = {
+    __SITE_NAME__: escapeHtml(siteNameFromFindings(findings)),
     __METADATA__: renderMetadata(findings),
     __SUMMARY__: renderSummary(findings),
     __PENDING_SCANS__: renderPendingScans(findings),
     __CATEGORIES__: renderCategories(findings),
     __PERMISSIONS_AUDIT__: renderPermissionsAudit(findings),
+    // Severity counts and pending count are injected as JSON literals so the
+    // template's small amount of JS can render stat cards and nav badges
+    // without an extra data-attribute round-trip.
+    __SEVERITY_COUNTS_JSON__: JSON.stringify(severityCounts),
+    __PENDING_COUNT__: String(pendingCount),
   };
 
   let html = template;
@@ -267,6 +342,8 @@ module.exports = {
   renderPermissionsAudit,
   renderPendingScans,
   renderMetadata,
+  countBySeverity,
+  siteNameFromFindings,
   TEMPLATE_PATH,
   EXIT,
 };

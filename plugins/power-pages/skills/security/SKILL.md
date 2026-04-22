@@ -74,7 +74,8 @@ Ask two questions sequentially with `AskUserQuestion`. Use plain, user-friendly 
 | OWASP Top 10 | General posture review combining dynamic (runtime) and static (source) findings tagged A01–A10. Familiar framing for compliance conversations. |
 | CWE / CWE Top 25 | Source-code and runtime findings tagged with CWE IDs; the Top 25 flags the most critical classes. |
 | OWASP ASVS | Findings tagged against OWASP Application Security Verification Standard control sections. |
-| CVE / dependency vulnerabilities (SCA) | Third-party dependency vulnerabilities tagged by CVE and severity. |
+| CVE / dependency vulnerabilities (SCA) | Third-party dependency vulnerabilities tagged by CVE and severity. Also surfaces packages whose upstream has reached end-of-life (deprecated / unmaintained) so they can be planned for replacement before they become CVE targets. |
+| Dependency license audit | Every third-party dependency's declared license, classified copyleft (GPL / AGPL / LGPL) / weak-copyleft (Mozilla-class) / permissive / unknown. Particularly important for non-open-source / commercial sites — the user needs to confirm they have a license to distribute any copyleft or unknown entries. |
 | IaC misconfiguration | Infrastructure-as-code misconfigurations (Terraform, CloudFormation, Kubernetes, Helm, Dockerfile). |
 | Bring-your-own checklist | User-supplied checklist (markdown / text / YAML) or tool config (Semgrep rules, CodeQL query pack). |
 
@@ -121,6 +122,7 @@ The output is a single JSON blob with:
 - Deep-scan state + latest report summary + score (from `scan.js --ongoing` / `--report` / `--score`)
 - HTTP/* site-settings audit (from `security-headers.js --audit`)
 - Detected project languages (from `detect-languages.js`)
+- Local web-role definitions from `.powerpages-site/web-roles/*.webrole.yml` (read inline by the snapshot script). Shape: `{ present, count, roles[] }` or `{ error }` when the directory / files can't be read. This is the signal Phase 4 uses to flag OWASP A01 when a Private site has zero web roles, or when a Public site lists web roles that are never bound to any page.
 
 Also invoke the existing table-permissions flow in parallel:
 ```
@@ -134,6 +136,7 @@ This produces `docs/permissions-audit.html`. Wait for that skill to complete bef
 - Semgrep SAST → `semgrep scan --config <ruleset> --sarif --output <sarif-path> <project-root>` via `Bash run_in_background: true`
 - CodeQL SAST → `node "${CLAUDE_PLUGIN_ROOT}/skills/code-analysis/scripts/run-codeql.js" --projectRoot <path> --language javascript-typescript --querySuite <suite> --sarifOut <sarif-path>` via `Bash run_in_background: true`
 - Trivy SCA → `trivy fs --scanners vuln --format sarif --output <sarif-path> <project-root>` (usually sub-minute; can run synchronously)
+- Trivy dependency license audit → `trivy fs --scanners license --format json --output <license-path> <project-root>` (sub-minute; synchronous). If both SCA and license are in scope, combine into a single `--scanners vuln,license --format json` run and parse both outputs from one file.
 - Checkov IaC → `checkov -d <project-root> --output sarif --output-file-path <sarif-path>` (sub-minute; can run synchronously)
 
 Ruleset / query-suite defaults follow the framework — see `skills/code-analysis/SKILL.md` Phase 4 (ruleset table) for the exact mapping. The scan completion hook at `plugins/power-pages/hooks/hooks.json` will surface results when the long-running scans finish; pick them up and fold into the report during Phase 5 or Phase 7.
@@ -142,7 +145,7 @@ Ruleset / query-suite defaults follow the framework — see `skills/code-analysi
 
 For each signal gathered in Phase 3, classify it as Critical / High / Medium or Passing check per the severity scheme in `references/orchestration.md`. Then organize findings by the framework chosen in Phase 2 — the framework is the organizing principle, not a separate layout decision.
 
-- **OWASP Top 10** — use the category → area mapping in `references/orchestration.md`. Each finding falls into A01–A10 based on the signal's source and nature.
+- **OWASP Top 10** — use the category → area mapping in `references/orchestration.md`. Each finding falls into A01–A10 based on the signal's source and nature. For web-role signals specifically: if `webRoles.present` is `false` or `webRoles.count` is `0` and the site is Private (`website.SiteVisibility === 'Private'`), raise a **High** finding under A01 ("Private site with no web roles — no role-based gating exists; access control relies solely on Entra authentication"). If the site is Public and web roles exist but the user has restricted pages that look like they should be gated (admin / settings / internal-sounding paths), raise a **Medium** finding under A01 recommending the user bind the web role to those pages via `/create-webroles`. Delegate every web-role fix to `/create-webroles`.
 - **CWE / CWE Top 25** — group by the CWE id on the finding. Posture-snapshot signals (WAF disabled, missing CSP, etc.) do not have native CWE ids; place them under the best-fit CWE (e.g., missing CSP → CWE-1021, WAF disabled → CWE-693) and annotate the mapping in the evidence line so the user can see the reasoning.
 - **OWASP ASVS** — group by ASVS section (V1 Architecture, V2 Authentication, V3 Session, V4 Access Control, V5 Validation, …). Semgrep ASVS rules tag directly; posture signals need manual section assignment with evidence annotation.
 - **CVE / SCA** — group by package name, ordered by highest severity CVE per package. The review has nothing useful to say in this framework without the SCA tool (Trivy) — if the tool was unselected, Phase 2 already warned the user.
