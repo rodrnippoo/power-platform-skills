@@ -173,6 +173,8 @@ Invoke via `Bash` with `run_in_background: true`. Tell the user the scan is runn
 node "${CLAUDE_PLUGIN_ROOT}/skills/code-analysis/scripts/parse-sarif.js" --sarif "<sarif-path>"
 ```
 
+A registered `UserPromptSubmit` hook (`hooks/code-analysis-scan-check.js`) watches for the `.codeql-db/.state-done` marker that `run-codeql.js` writes on completion. When the user returns to the session with any new prompt, the hook surfaces a one-time note to Claude reminding it the scan is done and pointing at the paired parse command — so you do not need to poll manually.
+
 Then jump to Phase 6 with what you have — the parse command is the follow-up.
 
 **SCA (Trivy) and IaC (Checkov) — fast, run synchronously.**
