@@ -1,11 +1,11 @@
 # Security review orchestration reference
 
-Single consolidated reference for the `security` meta-skill — the OWASP category → sub-skill mapping, the full finding-type → delegation table, the findings JSON schema the HTML report consumes, and how `audit-permissions` integrates into the unified report.
+Single consolidated reference for the `security` meta-skill — the OWASP category → security area mapping, the full finding-type → delegation table, the findings JSON schema the HTML report consumes, and how `audit-permissions` integrates into the unified report.
 
 ## Contents
 
-- [Grouping modes — how findings are organized](#grouping-modes--how-findings-are-organized)
-- [OWASP Top 10 → sub-skill mapping](#owasp-top-10--sub-skill-mapping)
+- [Finding layout — how findings are organized in the report](#finding-layout--how-findings-are-organized-in-the-report)
+- [OWASP Top 10 → security area mapping](#owasp-top-10--security-area-mapping)
 - [Full delegation table](#full-delegation-table)
 - [Severity scheme](#severity-scheme)
 - [Findings JSON schema](#findings-json-schema)
@@ -13,23 +13,25 @@ Single consolidated reference for the `security` meta-skill — the OWASP catego
 - [Posture snapshot — what each read returns](#posture-snapshot--what-each-read-returns)
 - [Bring-your-own checklist — how to scope](#bring-your-own-checklist--how-to-scope)
 
-## Grouping modes — how findings are organized
+## Finding layout — how findings are organized in the report
 
-The meta-skill supports five grouping modes; the user picks one in Phase 2. Grouping does not change which signals are collected — only how they are presented in the report.
+The meta-skill supports five ways to organize findings in the report. The user picks one in Phase 2. Layout choice only affects presentation — it does not change which signals are collected.
 
-| Grouping | `categories[].id` convention | When it fits | Reference section |
+When presenting options to the user in Phase 2, use the plain-English labels in the "Label shown to user" column. Internal ids (`by-area`, `by-severity`, etc.) are for `categories[].id` in the findings JSON only.
+
+| Label shown to user | `categories[].id` convention | When it fits | Reference section |
 |---|---|---|---|
-| **OWASP Top 10** | `A01`, `A02`, …, `A10` | Compliance conversations, audit framing, cross-team reviews | [OWASP Top 10 → sub-skill mapping](#owasp-top-10--sub-skill-mapping) |
+| **OWASP Top 10** | `A01`, `A02`, …, `A10` | Compliance conversations, audit framing, cross-team reviews | [OWASP Top 10 → security area mapping](#owasp-top-10--security-area-mapping) |
 | **By severity** | `critical`, `high`, `medium`, `passing` | Triage — "what should I fix first" | Uses the same [severity scheme](#severity-scheme); each severity is a bucket |
-| **By sub-skill** | `site-visibility`, `web-application-firewall`, `security-headers`, `security-scan`, `code-analysis`, `audit-permissions`, `setup-auth`, `create-webroles` | Fix-path clarity — matches the [full delegation table](#full-delegation-table) |
+| **By security area** | `site-visibility`, `web-application-firewall`, `security-headers`, `security-scan`, `code-analysis`, `audit-permissions`, `setup-auth`, `create-webroles` | Clear fix path — each area maps directly to the skill that owns the fix (see the [full delegation table](#full-delegation-table)) |
 | **Custom checklist** | Slug of each checklist item (e.g., `verify-csp-set`, `verify-waf-enabled`) | Internal standards, compliance-as-code, teams with their own hardening list | [Bring-your-own checklist](#bring-your-own-checklist--how-to-scope) |
-| **Freeform / targeted** | Whatever labels fit the user's described scope | Narrow asks — "only headers and WAF" | None — use the most fitting sub-skill grouping inside the scope the user specified |
+| **Focused scope** | Whatever labels fit the user's described scope | Narrow asks — "only headers and WAF" | None — use the most fitting area layout inside the scope the user specified |
 
-Whichever grouping is chosen, the severity scheme and the sub-skill source are still recorded on every finding. The report's executive summary always shows counts by severity regardless of grouping, so that information is never lost.
+Whichever layout is chosen, the severity scheme and the source area are still recorded on every finding. The report's executive summary always shows counts by severity regardless of layout, so that information is never lost.
 
-## OWASP Top 10 → sub-skill mapping
+## OWASP Top 10 → security area mapping
 
-Each OWASP category can draw signals from multiple sub-skills. This table is the authoritative map the meta-skill uses to bucket findings.
+Each OWASP category can draw signals from multiple security areas. This table is the authoritative map the meta-skill uses to bucket findings.
 
 | Category | Description | Signals from |
 |---|---|---|
@@ -48,7 +50,7 @@ Categories that rely on both dynamic AND static evidence (A03, A06, A08, A10) be
 
 ## Full delegation table
 
-Every finding type and which sub-skill owns both the analysis AND the remediation. The meta-skill never reimplements these — it invokes them with per-change approval.
+Every finding type and which skill owns both the analysis AND the remediation. The meta-skill never reimplements these — it invokes them with per-change approval.
 
 | Finding area | Read / analyze via | Remediate via | Notes |
 |---|---|---|---|
@@ -57,8 +59,8 @@ Every finding type and which sub-skill owns both the analysis AND the remediatio
 | WAF enable / disable | `/web-application-firewall --status` | `/web-application-firewall --enable` or `--disable` | Async; poll status after kicking off |
 | WAF rules (custom + managed-rule overrides) | `/web-application-firewall --rules` | `/web-application-firewall --create-rules` or `--delete-custom` | Plan file required; first-match-wins semantics matter |
 | Dynamic vulnerability scan | `/security-scan --ongoing` / `--report` / `--score` | `/security-scan --deep` (to trigger a fresh scan) | Long-running; starts in background |
-| Static-code vulnerabilities (SAST) | `/code-analysis` (Semgrep or CodeQL) | Code edits — the sub-skill produces findings; the user fixes the code | Long-running for CodeQL |
-| Dependency CVEs (SCA) | `/code-analysis` (Trivy) | `package.json` / lock-file updates — out of sub-skill scope beyond reporting | Fast scan |
+| Static-code vulnerabilities (SAST) | `/code-analysis` (Semgrep or CodeQL) | Code edits — the skill produces findings; the user fixes the code | Long-running for CodeQL |
+| Dependency CVEs (SCA) | `/code-analysis` (Trivy) | `package.json` / lock-file updates — out of scope beyond reporting | Fast scan |
 | Table permissions | `/audit-permissions` | `/audit-permissions` (which invokes the `table-permissions-architect` agent for fixes) | The `table-permissions-architect` agent is preserved as the fix path; this skill never bypasses it |
 | Web roles | `/create-webroles` | `/create-webroles` | Creates role records + UI gating rules |
 | Authentication / identity providers / anti-forgery | `/setup-auth` | `/setup-auth` | Configures OAuth / OIDC providers, login/logout, token handling |
@@ -84,7 +86,7 @@ Severity assignment guidance:
 
 ## Findings JSON schema
 
-The `render-report.js` script consumes a single JSON file with this shape. Build it by aggregating the posture snapshot + individual sub-skill outputs.
+The `render-report.js` script consumes a single JSON file with this shape. Build it by aggregating the posture snapshot + individual skill outputs.
 
 ```json
 {
@@ -179,9 +181,9 @@ When the user picks "bring-your-own checklist" in Phase 2, collect the checklist
 
 For each checklist item, in Phase 4:
 
-1. Decide which sub-skill's output is the right evidence source.
-2. Grade the item Critical / High / Medium / Passing based on what the sub-skill reports.
+1. Decide which security area's output is the right evidence source.
+2. Grade the item Critical / High / Medium / Passing based on what that area reports.
 3. Add the item to the unified report under a custom `checklists` top-level category (parallel to `categories` in the findings JSON — `render-report.js` handles both shapes).
-4. For remediation, delegate to whichever sub-skill owns the concern, same as OWASP mode.
+4. For remediation, delegate to whichever skill owns the concern, same as OWASP mode.
 
-If a checklist item has no matching sub-skill signal — e.g., "verify legal review was performed" — flag it as a manual-review item in the report and stop; the meta-skill does not pretend to cover non-automatable concerns.
+If a checklist item has no matching signal — e.g., "verify legal review was performed" — flag it as a manual-review item in the report and stop; the meta-skill does not pretend to cover non-automatable concerns.

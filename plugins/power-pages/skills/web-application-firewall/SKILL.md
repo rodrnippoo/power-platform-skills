@@ -53,19 +53,7 @@ WAF log retrieval is intentionally NOT in this skill. Logs live in the Dataverse
 
 ## Workflow
 
-Copy this checklist into your first response and check items off as each phase completes:
-
-```
-Progress:
-- [ ] Phase 1: Check prerequisites and resolve portal id
-- [ ] Phase 2: Read current WAF state
-- [ ] Phase 3: Align on the desired change
-- [ ] Phase 4: Apply (approval per operation)
-- [ ] Phase 5: Verify
-- [ ] Phase 6: Summarize and record skill usage
-```
-
-At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_progress` when you enter a phase and `completed` the moment it ends — do not batch updates.
+At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_progress` when you enter a phase and `completed` the moment it ends — do not batch updates. The final response carries a progress tracking table (see the end of this file) so the user can see at-a-glance what each phase produced.
 
 ### Phase 1 — Prerequisites and portal id resolution
 
@@ -104,14 +92,14 @@ Keep the current rule set in your response context — Phase 3 builds the target
 
 ### Phase 3 — Align on the desired change
 
-Use `AskUserQuestion` to confirm what the user wants. This skill supports three operation families; a session may combine them:
+Use `AskUserQuestion` to confirm what the user wants. A session may combine more than one of these changes:
 
-| Family | Intent | Command |
+| Change | What it does | Command |
 |---|---|---|
-| Toggle | Enable WAF | `--enable` |
-| Toggle | Disable WAF | `--disable` |
-| Rule config | Add / update / replace custom rules, or disable a specific managed rule | `--create-rules --body <file>` |
-| Rule removal | Remove named custom rules | `--delete-custom --names <file>` |
+| Turn WAF on | Enable the firewall | `--enable` |
+| Turn WAF off | Disable the firewall | `--disable` |
+| Edit rules | Add / update / replace custom rules, or disable a specific managed rule | `--create-rules --body <file>` |
+| Remove rules | Remove named custom rules | `--delete-custom --names <file>` |
 
 For rule-configuration operations the skill uses a plan-validate-execute pattern. A single operation is relatively cheap to reverse; a rule change that blocks real traffic is not. Follow this order:
 

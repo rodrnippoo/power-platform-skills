@@ -51,20 +51,7 @@ The skill orchestrates external tools (Semgrep, CodeQL, Trivy, Checkov). It does
 
 ## Workflow
 
-Copy this checklist into your first response and check items off as each phase completes:
-
-```
-Progress:
-- [ ] Phase 1: Check which scan tools are installed
-- [ ] Phase 2: Select the security framework
-- [ ] Phase 3: Select the tool for that framework
-- [ ] Phase 4: Plan (language, excludes, output paths)
-- [ ] Phase 5: Execute (background for SAST, synchronous for SCA / IaC)
-- [ ] Phase 6: Present findings
-- [ ] Phase 7: Summarize and record skill usage
-```
-
-At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_progress` when you enter a phase and `completed` the moment it ends — do not batch updates.
+At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_progress` when you enter a phase and `completed` the moment it ends — do not batch updates. The final response carries a progress tracking table (see the end of this file) so the user can see at-a-glance what each phase produced.
 
 ### Phase 1 — Check which scan tools are installed
 
@@ -213,12 +200,12 @@ Present to the user:
 
 1. **Headline** — which tool ran, against which framework / ruleset, and how many findings at each severity.
 2. **Top rules / findings** — the 3–5 rules with the most hits. For each, show the rule id, severity, and a representative finding (file + line + message).
-3. **Per-framework grouping** (framework-specific — look at the rule tags):
-   - **Semgrep + OWASP Top 10**: Semgrep tags `owasp:A01:2021` etc. directly. Group findings by the OWASP tag; if a finding has no OWASP tag, surface it under the rule-id grouping.
-   - **Semgrep + CWE Top 25 / ASVS**: Group by the relevant tag (`cwe:CWE-NNN`, `asvs:v*.*.*`).
-   - **CodeQL**: Group by the CWE tag in `external/cwe/cwe-NNN`. If the user asked for OWASP Top 10, note that CodeQL tags CWE not OWASP — list findings under CWE and let the user map if they want.
-   - **Trivy**: Group by CVE severity (CRITICAL / HIGH / MEDIUM / LOW) and package name.
-   - **Checkov**: Group by IaC resource type (Terraform resource, K8s kind, etc.).
+3. **Organize findings by framework tag** (framework-specific — look at the rule tags):
+   - **Semgrep + OWASP Top 10**: Semgrep tags `owasp:A01:2021` etc. directly. Organize findings by the OWASP tag; if a finding has no OWASP tag, list it under the rule id instead.
+   - **Semgrep + CWE Top 25 / ASVS**: Organize by the relevant tag (`cwe:CWE-NNN`, `asvs:v*.*.*`).
+   - **CodeQL**: Organize by the CWE tag in `external/cwe/cwe-NNN`. If the user asked for OWASP Top 10, note that CodeQL tags CWE not OWASP — list findings under CWE and let the user map if they want.
+   - **Trivy**: Organize by CVE severity (CRITICAL / HIGH / MEDIUM / LOW) and package name.
+   - **Checkov**: Organize by IaC resource type (Terraform resource, K8s kind, etc.).
 4. **Action hints** — for each prominent finding, briefly note the remediation direction (e.g. "parameterize queries" for injection, "pin / upgrade the package" for CVE, "set the Terraform resource's encryption flag" for misconfig). Keep these terse.
 
 Do not dump the full finding list unless asked. Large scans produce hundreds of findings; a wall of text buries the important ones.

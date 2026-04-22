@@ -4,9 +4,8 @@
 //
 // Reading the current visibility is handled elsewhere: call
 // `scripts/lib/website.js --websiteRecordId <guid>` and read the
-// `SiteVisibility` field on the returned website record. There is no
-// dedicated "get visibility" command in this family — the record-level
-// read is the source of truth.
+// `SiteVisibility` field on the returned website record. This script
+// only handles the write; the record read is the source of truth.
 //
 // The flip restarts the site; callers that re-read the website record
 // immediately afterwards may still see the old value. Allow 30-60s for

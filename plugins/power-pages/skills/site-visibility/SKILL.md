@@ -42,19 +42,7 @@ Who can sign in to a Private site is a separate per-site allow-list managed from
 
 ## Workflow
 
-Copy this checklist into your first response and check items off as each phase completes:
-
-```
-Progress:
-- [ ] Phase 1: Check prerequisites and resolve portal id
-- [ ] Phase 2: Read current visibility
-- [ ] Phase 3: Align on the target visibility
-- [ ] Phase 4: Apply the flip (approval required)
-- [ ] Phase 5: Verify the new state
-- [ ] Phase 6: Summarize and record skill usage
-```
-
-At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_progress` when you enter a phase and `completed` the moment it ends — do not batch updates.
+At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_progress` when you enter a phase and `completed` the moment it ends — do not batch updates. The final response carries a progress tracking table (see the end of this file) so the user can see at-a-glance what each phase produced.
 
 ### Phase 1 — Prerequisites and portal id resolution
 

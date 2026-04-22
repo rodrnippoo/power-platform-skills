@@ -74,7 +74,7 @@ semgrep scan \
 
 ## CodeQL — deep SAST alternative for JS/TS
 
-**What it covers:** deep dataflow-based SAST for JavaScript, TypeScript, Python, Java, C#, C/C++, Go, Ruby, Swift. Rules are CWE-tagged but NOT OWASP-tagged; if the user wants OWASP grouping, use Semgrep instead.
+**What it covers:** deep dataflow-based SAST for JavaScript, TypeScript, Python, Java, C#, C/C++, Go, Ruby, Swift. Rules are CWE-tagged but NOT OWASP-tagged; if the user wants findings organized by OWASP category, use Semgrep instead.
 
 **Install:** download the CodeQL CLI binary archive for your platform from the official GitHub maintainer-hosted release, unpack to a stable location (e.g., `~/codeql` or `C:\tools\codeql`), and add the directory containing the `codeql` executable to PATH.
 

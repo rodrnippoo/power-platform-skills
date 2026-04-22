@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-// posture-snapshot.js — run the read commands from every security-family
-// sub-skill in parallel and aggregate the results into a single JSON blob
-// the meta-skill can consume in one shot.
+// posture-snapshot.js — run the read commands from every security area in
+// parallel and aggregate the results into a single JSON blob the meta-skill
+// can consume in one shot.
 //
 // Why this exists: Phase 3 of the /security meta-skill otherwise has to
 // issue 7+ sequential reads (website lookup, WAF status, WAF rules, scan
@@ -39,10 +39,10 @@ const HELP = `Usage:
   posture-snapshot.js --portalId <guid> --projectRoot <path>
   posture-snapshot.js --help
 
-Runs every security-family sub-skill's read command in parallel and
-aggregates the results into a single JSON blob. Failures in individual
-reads are captured as { "error": "..." } fields; the rest of the snapshot
-still succeeds.
+Runs every security-area read command in parallel and aggregates the
+results into a single JSON blob. Failures in individual reads are
+captured as { "error": "..." } fields; the rest of the snapshot still
+succeeds.
 
 Options:
   --portalId <guid>     Power Pages portal id (REQUIRED). Resolve from the

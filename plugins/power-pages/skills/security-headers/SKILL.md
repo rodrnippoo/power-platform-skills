@@ -55,19 +55,7 @@ Configure HTTP security headers for a Power Pages site by writing site-setting Y
 
 ## Workflow
 
-Copy this checklist into your first response and check items off as each phase completes:
-
-```
-Progress:
-- [ ] Phase 1: Check prerequisites
-- [ ] Phase 2: Audit current HTTP/* site-settings
-- [ ] Phase 3: Plan the change (CSP allowlist discovery when applicable)
-- [ ] Phase 4: Apply (approval per setting)
-- [ ] Phase 5: Verify the file writes
-- [ ] Phase 6: Summarize and suggest /deploy-site
-```
-
-At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_progress` when you enter a phase and `completed` the moment it ends — do not batch updates.
+At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_progress` when you enter a phase and `completed` the moment it ends — do not batch updates. The final response carries a progress tracking table (see the end of this file) so the user can see at-a-glance what each phase produced.
 
 ### Phase 1 — Prerequisites
 
@@ -92,9 +80,9 @@ Summarize the current posture to the user before asking what they want to change
 
 ### Phase 3 — Plan the change
 
-Use `AskUserQuestion` to confirm intent. The skill supports five change families:
+Use `AskUserQuestion` to confirm intent. The skill supports five kinds of change:
 
-| Family | Intent | Notes |
+| Change | What it does | Notes |
 |---|---|---|
 | Add or update a header | Any recognized `HTTP/*` setting | One-shot; Phase 4 writes the YAML |
 | Configure CSP | `HTTP/Content-Security-Policy` and/or `HTTP/Content-Security-Policy-Report-Only` | Run CSP allowlist discovery first (below) |

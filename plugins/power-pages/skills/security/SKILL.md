@@ -2,24 +2,24 @@
 name: security
 description: >-
   Orchestrates an end-to-end security review of a Power Pages site —
-  assesses the current posture against whatever framework or grouping
-  the user picks (OWASP Top 10, severity-ordered, by sub-skill, a
-  bring-your-own checklist, or a freeform focus on specific areas);
-  presents findings in a unified HTML report; and applies
-  remediations with per-change user approval by delegating to the
-  right sub-skill (site-visibility, web-application-firewall,
-  security-headers, security-scan, code-analysis) or existing plugin
-  skill (setup-auth, create-webroles, audit-permissions, deploy-site).
-  Use when the user asks for a security review, security audit,
-  security posture check, OWASP assessment, hardening sweep, or wants
-  to see every security signal the plugin can surface — even if they
-  do not name a specific framework. Out of scope: running any
-  individual check in isolation (call the specific sub-skill
-  directly), and compliance against frameworks other than OWASP
-  (cloud / NIST / PCI / HIPAA compliance requires dedicated tooling
-  outside this plugin).
+  assesses the current posture and organizes findings however the
+  user prefers (OWASP Top 10 categories, severity-ordered, by
+  security area, a bring-your-own checklist, or a focused scope on
+  specific areas); presents findings in a unified HTML report; and
+  applies remediations with per-change user approval by delegating
+  to the skill that owns the concern (site-visibility,
+  web-application-firewall, security-headers, security-scan,
+  code-analysis, setup-auth, create-webroles, audit-permissions,
+  deploy-site). Use when the user asks for a security review,
+  security audit, security posture check, OWASP assessment,
+  hardening sweep, or wants to see every security signal the plugin
+  can surface — even if they do not name a specific framework. Out
+  of scope: running any individual check in isolation (invoke that
+  skill directly), and compliance against frameworks other than
+  OWASP (cloud / NIST / PCI / HIPAA compliance requires dedicated
+  tooling outside this plugin).
 user-invocable: true
-argument-hint: "[optional: framework — owasp / checklist / freeform]"
+argument-hint: "[optional: focus area, e.g. 'full review' or 'only CSP']"
 allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
 model: opus
 ---
@@ -28,46 +28,33 @@ model: opus
 
 # Security
 
-Coordinate a security review of a Power Pages site. This skill does no scanning of its own — every finding comes from one of the specialized sub-skills or existing plugin skills, and every remediation delegates back to the skill that owns the concern. The meta-skill's value is the *framework-driven sequencing*, the *unified report*, and the *per-change approval loop* that makes hardening safe.
+Coordinate a security review of a Power Pages site. This skill does no scanning of its own — every finding comes from one of the specialized security-area skills or existing plugin skills, and every remediation delegates back to the skill that owns the concern. The value here is the *framework-driven sequencing*, the *unified report*, and the *per-change approval loop* that makes hardening safe.
 
-Every change is one sub-skill invocation behind explicit user approval — no batch application, no silent writes. The sub-skill that owns the change stays authoritative; this skill never reimplements anything they do.
+Every change is one delegated invocation behind explicit user approval — no batch application, no silent writes. The skill that owns the change stays authoritative; this skill never reimplements anything they do.
 
 ## When to load which reference
 
-- `references/orchestration.md` — load at the start of Phase 2 (framework selection) for the OWASP category → sub-skill mapping, the full finding-type → delegation table, and the JSON schema the HTML report consumes.
+- `references/orchestration.md` — load at the start of Phase 2 (framework selection) for the OWASP category → security area mapping, the full finding-type → delegation table, and the JSON schema the HTML report consumes.
 
 ## Gotchas
 
 - **Framework-driven, not tool-driven.** OWASP is a framework. `security-scan` (ZAP-based dynamic scan) is a tool that covers *a subset* of OWASP. Running ZAP alone is not an OWASP review. Known ZAP gaps include design-time intent (table-permission misuse) and network-level checks — cover those via `/audit-permissions` and the posture snapshot.
 - **Delegate table-permission audits; do not reimplement them.** `/audit-permissions` already produces an HTML report at `docs/permissions-audit.html` with severity-grouped findings and delegates fixes to the `table-permissions-architect` agent. This skill INCLUDES those findings in the unified report and keeps a link back to the existing `permissions-audit.html` for deep-dive evidence. Do NOT parse permission YAML or re-query Dataverse from here.
 - **Auth / role remediations go through their own skills.** When the review surfaces an auth issue, the fix invokes `/setup-auth`. Role-based access fixes invoke `/create-webroles`. These skills have their own approval flows — do not bypass them with direct Dataverse writes.
-- **Long-running sub-skills do NOT block.** `/security-scan --deep` and `/code-analysis` SAST scans run in the background. If the user wants them included in the review, start them early (Phase 3 or 4) and let them run while the rest of the review proceeds. The HTML report shows partial results immediately; deeper findings append when the scans complete.
+- **Long-running security checks do NOT block.** `/security-scan --deep` and `/code-analysis` SAST scans run in the background. If the user wants them included in the review, start them early (Phase 3 or 4) and let them run while the rest of the review proceeds. The HTML report shows partial results immediately; deeper findings append when the scans complete.
 - **Bypass option for long-running scans is explicitly labeled "not recommended".** If the user wants to skip deep-scan or static code analysis for a review, surface the trade-off: "Bypassing means the review may miss OWASP A03 (injection), A10 (SSRF), and similar dataflow-derived findings." Accept the bypass if they confirm, and note it in the report.
 - **Cross-cloud runtime sources.** When proposing CSP remediations in Phase 6, remember `/security-headers` needs the cloud-specific `content.powerapps.*` host — never propose a remediation that lists all four clouds' hosts together. Delegate to `/security-headers` which handles this.
 - **Per-change approval is mandatory.** Phase 6 pauses with `AskUserQuestion` before every remediation. The user can accept, skip, or defer each finding individually — never batch-approve.
 
 ## Workflow
 
-Copy this checklist into your first response and check items off as each phase completes:
-
-```
-Progress:
-- [ ] Phase 1: Check prerequisites and resolve portal id
-- [ ] Phase 2: Align on the security framework
-- [ ] Phase 3: Discover current posture
-- [ ] Phase 4: Audit and analyze
-- [ ] Phase 5: Present findings in a unified HTML report
-- [ ] Phase 6: Harden (per-change approval, delegated remediations)
-- [ ] Phase 7: Post-hardening close-out
-```
-
-At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_progress` when you enter a phase, `completed` the moment it ends.
+At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_progress` when you enter a phase, `completed` the moment it ends. The final response carries a progress tracking table (see the end of this file) so the user can see at-a-glance what each phase produced.
 
 ### Phase 1 — Prerequisites and portal id resolution
 
 1. Confirm the working directory is a Power Pages code site — `.powerpages-site/website.yml` must exist. If missing, tell the user to run `/deploy-site` first and stop.
 2. Read the `id` field from `.powerpages-site/website.yml` — this is the website record id.
-3. Resolve the portal id once, and keep it for every sub-skill read in Phase 3 onward:
+3. Resolve the portal id once, and keep it for every security-area read in Phase 3 onward:
    ```bash
    node "${CLAUDE_PLUGIN_ROOT}/scripts/lib/website.js" --websiteRecordId <id-from-step-2>
    ```
@@ -76,25 +63,25 @@ At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_p
    - Non-zero exit with a prerequisite message → surface verbatim, stop. Do not install or re-authenticate on the user's behalf.
    - Exit 0 with `null` → site not deployed OR PAC profile pointed at the wrong environment. Ask which applies before recovering.
 
-### Phase 2 — Align on the review scope and grouping
+### Phase 2 — Agree on the review's scope and finding layout
 
-Use `AskUserQuestion`. Do NOT pre-select an option — let the user pick based on their context. The grouping choice shapes how Phase 4 buckets findings and how Phase 5 structures the report.
+Use `AskUserQuestion`. Use plain, user-friendly labels — avoid internal terms like "sub-skill", "grouping", or phase numbers in option text. Do NOT pre-select an option; let the user pick based on their context.
 
-Common choices, each optimized for a different use case:
+Offer these five ways to lay out findings in the final report (each optimized for a different use case):
 
-1. **OWASP Top 10** — findings bucketed into A01–A10. Familiar framing for posture reviews and compliance discussions. See the category → sub-skill mapping in `references/orchestration.md`.
+1. **OWASP Top 10** — findings organized into OWASP Top 10 categories (A01–A10). Familiar framing for posture reviews and compliance conversations.
 2. **By severity** — flat list ordered Critical → High → Medium → Passing. Fastest path to "what should I fix first".
-3. **By sub-skill** — grouped by which sub-skill surfaced the finding (site-visibility, WAF, headers, scan, permissions, code-analysis). Maps most directly to the Phase 6 fix path.
-4. **Custom checklist** — user points at a file (`.md`, `.txt`, `.yml`) in the working directory, or pastes a checklist inline. Findings match against each checklist item.
-5. **Freeform / targeted** — user describes what they want checked (e.g. "only the CSP and WAF rules"). Scope the review to exactly that area.
+3. **By security area** — findings organized by the kind of security concern: access control, web application firewall, HTTP headers, dynamic scan, table permissions, code analysis. Maps directly to how each finding gets fixed.
+4. **Custom checklist** — you provide a checklist file (markdown, text, or YAML) or paste one inline. Each checklist item becomes a section in the report.
+5. **Focused scope** — tell me one or two specific areas to review (e.g., "only CSP and WAF rules"). I scope the review to exactly that.
 
-If the user isn't sure which to pick, briefly surface the trade-off (OWASP for compliance conversations; severity for triage; sub-skill for fix-path clarity; checklist for internal standards) and ask again. Don't push them toward OWASP by default — a security review should fit their question, not impose an abstraction.
+If the user isn't sure which to pick, briefly surface the trade-off (OWASP for compliance conversations; severity for triage; area for fix-path clarity; checklist for internal standards) and ask again. Don't push them toward OWASP by default — a security review should fit their question, not impose an abstraction.
 
-Record the chosen grouping — Phase 4 buckets findings accordingly and Phase 5 renders the report using the chosen scheme.
+Record the chosen layout — Phase 4 organizes findings accordingly and Phase 5 renders the report using the chosen scheme.
 
 ### Phase 3 — Discover current posture
 
-Run the posture snapshot — a bundled script that issues the read commands from every sub-skill in parallel:
+Run the posture snapshot — a bundled script that issues the read commands from every security area in parallel:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/security/scripts/posture-snapshot.js" \
@@ -119,15 +106,15 @@ This produces `docs/permissions-audit.html`. Wait for that skill to complete bef
 
 ### Phase 4 — Audit and analyze
 
-For each signal gathered in Phase 3, classify it as Critical / High / Medium or Passing check per the severity scheme in `references/orchestration.md`. Then bucket findings according to whichever grouping the user picked in Phase 2:
+For each signal gathered in Phase 3, classify it as Critical / High / Medium or Passing check per the severity scheme in `references/orchestration.md`. Then organize findings according to whichever layout the user picked in Phase 2:
 
-- **OWASP Top 10** — use the category → sub-skill mapping in `references/orchestration.md`. Each finding falls into A01–A10 based on the signal's source and nature.
+- **OWASP Top 10** — use the category → area mapping in `references/orchestration.md`. Each finding falls into A01–A10 based on the signal's source and nature.
 - **By severity** — no per-category bucketing; sort findings by severity (Critical → High → Medium) and group the passing checks at the end.
-- **By sub-skill** — bucket by source (site-visibility / WAF / headers / scan / permissions / code-analysis). Maps findings to the skill that owns the fix.
+- **By security area** — bucket by source area (access control / web application firewall / HTTP headers / dynamic scan / table permissions / code analysis). Each area maps to the skill that owns the fix.
 - **Custom checklist** — decide which checklist item each signal fulfills or violates. Each checklist item becomes a bucket; findings land in the matching bucket with their severity and evidence.
-- **Freeform / targeted** — restrict the review to the areas the user described; drop other signals from the report. Within the scope, group by whichever sub-structure fits (usually by sub-skill).
+- **Focused scope** — restrict the review to the areas the user described; drop other signals from the report. Within the scope, organize by whichever sub-structure fits (usually by security area).
 
-Severity assignment and source-skill identification apply regardless of grouping. The findings JSON schema in `references/orchestration.md` supports arbitrary category IDs — `categories[].id` is `A01` for OWASP, a slug for checklist items, the sub-skill name for by-sub-skill grouping, `critical` / `high` / `medium` for by-severity grouping, or a custom label for freeform.
+Severity assignment and source-area identification apply regardless of layout. The findings JSON schema in `references/orchestration.md` supports arbitrary category IDs — `categories[].id` is `A01` for OWASP, a slug for checklist items, an area name for by-area layout, `critical` / `high` / `medium` for by-severity, or a custom label for focused scope.
 
 ### Phase 5 — Present findings in a unified HTML report
 
@@ -142,7 +129,7 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/security/scripts/render-report.js" \
 The report includes, in this order:
 - Executive summary (counts by severity + by OWASP category)
 - Framework used, timestamp, portal id + site name
-- Per-category finding list, each finding showing: description, evidence (what was checked and what was seen), severity, source sub-skill, suggested remediation, and status (open / fixed / deferred).
+- Per-category finding list, each finding showing: description, evidence (what was checked and what was seen), severity, source area, suggested remediation, and status (open / fixed / deferred).
 - **Table-permissions section that INCLUDES the findings from `/audit-permissions`** re-rendered under the unified severity scheme, with a prominent "Full evidence: docs/permissions-audit.html" link back to the original report. Do NOT duplicate the `permissions-audit.html` doc — link to it.
 - Pending long-running results banner: if a deep scan or SAST is still running, the report carries a "Additional findings pending from <scan-type>" notice with the polling command.
 
@@ -150,7 +137,7 @@ Open the report in the browser (or tell the user the path) and pause here for re
 
 ### Phase 6 — Harden (per-change approval, delegated remediations)
 
-For each open finding the user wants to address, delegate to the owning sub-skill. Use `AskUserQuestion` per finding — accept / skip / defer. Never batch approvals.
+For each open finding the user wants to address, delegate to the skill that owns that concern. Use `AskUserQuestion` per finding — accept / skip / defer. Never batch approvals.
 
 Delegation map (full version in `references/orchestration.md`):
 
@@ -170,9 +157,9 @@ After each successful remediation, update the `status` field in the findings JSO
 
 ### Phase 7 — Post-hardening close-out
 
-1. If the user applied any remediation, offer to re-run the relevant sub-skill's read command to verify the change stuck (e.g., re-read `--status` after a WAF enable; re-audit site-settings after a header change).
+1. If the user applied any remediation, offer to re-run the relevant read command to verify the change stuck (e.g., re-read `--status` after a WAF enable; re-audit site-settings after a header change).
 2. For long-running scans that completed during the session, incorporate their findings — re-render the report with the updated JSON so the final artifact is complete.
-3. Clean up transient working files at the project root (findings JSON drafts, plan files produced by sub-skills) unless the user wants to keep them. The unified HTML report itself is a deliverable — leave it in place at `docs/security-review.html`.
+3. Clean up transient working files at the project root (findings JSON drafts, plan files produced during the review) unless the user wants to keep them. The unified HTML report itself is a deliverable — leave it in place at `docs/security-review.html`.
 4. Summarize for the user:
    - Total findings → how many fixed / deferred / skipped.
    - Per-category counts post-hardening.
