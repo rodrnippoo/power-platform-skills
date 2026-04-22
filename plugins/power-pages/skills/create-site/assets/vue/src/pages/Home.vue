@@ -171,10 +171,10 @@ onMounted(() => {
   }
 
   function showStatus(index: number) {
+    renderStatusMessage(statuses[index].text)
+    if (liveOverride) return
     const phaseIndex = Math.min(Math.floor((index / statuses.length) * phaseLabels.length), phaseLabels.length - 1)
     updatePhaseLabel(phaseLabels[phaseIndex])
-    if (liveOverride) return
-    renderStatusMessage(statuses[index].text)
   }
 
   function advanceStatus() {
@@ -199,9 +199,13 @@ onMounted(() => {
         liveOverride = true
         if (data.message !== lastLiveMessage) {
           lastLiveMessage = data.message
-          renderStatusMessage(data.message)
+          updatePhaseLabel(data.message)
         }
       } else {
+        if (liveOverride) {
+          const phaseIndex = Math.min(Math.floor((currentStatusIndex / statuses.length) * phaseLabels.length), phaseLabels.length - 1)
+          updatePhaseLabel(phaseLabels[phaseIndex])
+        }
         liveOverride = false
         lastLiveMessage = null
       }
@@ -217,6 +221,10 @@ onMounted(() => {
         if (banner) banner.hidden = !(awaiting && !userDismissed)
       }
     } catch {
+      if (liveOverride) {
+        const phaseIndex = Math.min(Math.floor((currentStatusIndex / statuses.length) * phaseLabels.length), phaseLabels.length - 1)
+        updatePhaseLabel(phaseLabels[phaseIndex])
+      }
       liveOverride = false
       lastLiveMessage = null
       if (lastAwaiting) {
