@@ -44,11 +44,17 @@ function renderTemplate({ templatePath, outputPath, dataPath, dataObject, requir
     process.exit(1);
   }
 
-  // Replace all __KEY__ placeholders with corresponding values from the data object
+  // Replace all __KEY__ placeholders with corresponding values from the data object.
+  // For non-string values (arrays/objects serialized to JSON), escape `<` as `<`
+  // so a literal `</script>` inside string data cannot close a containing <script> tag.
+  // String values are left as-is — they must be placed in safe HTML text contexts only
+  // (see plugins/power-pages/AGENTS.md for the convention).
   let result = template;
   for (const [key, value] of Object.entries(data)) {
     const placeholder = `__${key}__`;
-    const replacement = typeof value === 'string' ? value : JSON.stringify(value);
+    const replacement = typeof value === 'string'
+      ? value
+      : JSON.stringify(value).replace(/</g, '\\u003c');
     result = result.split(placeholder).join(replacement);
   }
 

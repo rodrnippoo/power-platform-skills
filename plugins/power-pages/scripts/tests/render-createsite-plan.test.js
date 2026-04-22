@@ -147,6 +147,40 @@ test('render-createsite-plan fails when required keys are missing', () => {
   assert.match(result.stderr, /ROUTES_DATA/);
 });
 
+test('render-createsite-plan escapes </script> and < inside JSON data to prevent HTML injection', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'createsite-plan-'));
+  const outputPath = path.join(tempDir, 'plan-xss.html');
+
+  const malicious = {
+    ...SAMPLE_DATA,
+    PAGES_DATA: [
+      {
+        name: '</script><script>window.__pwned=1;</script>',
+        route: '/evil',
+        description: '<img src=x onerror=alert(1)>',
+        content: ['line with </script> closing tag'],
+        components: ['OK'],
+      },
+    ],
+  };
+
+  const result = spawnSync(
+    process.execPath,
+    [scriptPath, '--output', outputPath, '--data-inline', JSON.stringify(malicious)],
+    { encoding: 'utf8' }
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const html = fs.readFileSync(outputPath, 'utf8');
+  // Raw </script> must NOT appear inside any JSON data blob — it would close the script tag.
+  // The escaped form </script> is safe: JSON.parse decodes it back to the original string at runtime.
+  assert.ok(
+    !/<\/script>[^<]*window\.__pwned/i.test(html),
+    'rendered HTML leaks a literal </script> inside injected data'
+  );
+  assert.match(html, /\\u003c\/script>/);
+});
+
 test('render-createsite-plan refuses to overwrite existing file', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'createsite-plan-'));
   const dataPath = path.join(tempDir, 'data.json');

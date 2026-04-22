@@ -222,16 +222,31 @@ h3{font-size:15px;font-weight:700;color:var(--text-bright);margin-top:24px;margi
   </div>
 </div>
 
+<script id="typographyData" type="application/json">__TYPOGRAPHY_DATA__</script>
+<script id="paletteData" type="application/json">__PALETTE_DATA__</script>
+<script id="motionData" type="application/json">__MOTION_DATA__</script>
+<script id="backgroundsData" type="application/json">__BACKGROUNDS_DATA__</script>
+<script id="pagesData" type="application/json">__PAGES_DATA__</script>
+<script id="componentsData" type="application/json">__COMPONENTS_DATA__</script>
+<script id="routesData" type="application/json">__ROUTES_DATA__</script>
+<script id="reviewData" type="application/json">__REVIEW_DATA__</script>
+<script id="deploymentData" type="application/json">__DEPLOYMENT_DATA__</script>
+
 <script>
-const TYPOGRAPHY = __TYPOGRAPHY_DATA__;
-const PALETTE = __PALETTE_DATA__;
-const MOTION = __MOTION_DATA__;
-const BACKGROUNDS = __BACKGROUNDS_DATA__;
-const PAGES = __PAGES_DATA__;
-const COMPONENTS = __COMPONENTS_DATA__;
-const ROUTES = __ROUTES_DATA__;
-const REVIEW = __REVIEW_DATA__;
-const DEPLOYMENT = __DEPLOYMENT_DATA__;
+function readJsonData(id){
+  const node = document.getElementById(id);
+  return node ? JSON.parse(node.textContent) : null;
+}
+
+const TYPOGRAPHY = readJsonData('typographyData');
+const PALETTE = readJsonData('paletteData');
+const MOTION = readJsonData('motionData');
+const BACKGROUNDS = readJsonData('backgroundsData');
+const PAGES = readJsonData('pagesData');
+const COMPONENTS = readJsonData('componentsData');
+const ROUTES = readJsonData('routesData');
+const REVIEW = readJsonData('reviewData');
+const DEPLOYMENT = readJsonData('deploymentData');
 
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
 
