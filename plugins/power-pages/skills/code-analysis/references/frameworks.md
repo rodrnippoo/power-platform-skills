@@ -26,7 +26,8 @@ Phase 2 of the skill asks the user which framework to assess against. Phase 3 th
 | **CWE / CWE Top 25** (SAST) | Semgrep | CodeQL | Semgrep has a dedicated CWE Top 25 ruleset (`p/cwe-top-25`) and tags findings with CWE IDs directly. CodeQL covers CWE via its rule metadata; use it when deep dataflow analysis is worth the longer scan time. |
 | **OWASP Top 10** (SAST aspect) | Semgrep | CodeQL | Semgrep has an OWASP Top 10 ruleset (`p/owasp-top-ten`) with direct OWASP category tags (`owasp:A01:2021`). CodeQL tags CWE but not OWASP directly. For the DAST aspect of OWASP Top 10, use `/security-scan`. |
 | **OWASP ASVS** | Semgrep | — | Semgrep ships an ASVS ruleset (`p/owasp-asvs`) that tags findings against ASVS control sections. No other OSS SAST CLI has a dedicated ASVS ruleset. |
-| **CVE / dependency vulnerabilities** | Trivy | Grype+Syft, OSV-Scanner, OWASP Dependency-Check | Trivy is the de facto standard — single binary, scans repos / containers / SBOMs / filesystems, tags by CVE + severity + package. The alternatives cover the same ground; pick based on user preference or existing CI. |
+| **CVE / dependency vulnerabilities** | Trivy | Grype+Syft, OSV-Scanner, OWASP Dependency-Check | Trivy is the de facto standard — single binary, scans repos / containers / SBOMs / filesystems, tags by CVE + severity + package. It also flags packages whose upstream has reached end-of-life alongside the CVEs, which catches forward-looking risk even when no CVE is currently filed. The alternatives cover the same ground; pick based on user preference or existing CI. |
+| **Dependency license audit** | Trivy | ScanCode, Syft (SPDX-license output) | Trivy classifies every declared dependency license into `restricted` (copyleft — GPL / AGPL / LGPL), `reciprocal` (weak copyleft — Mozilla-class), `permissive` (MIT / Apache / BSD / ISC), or `unknown`. For non-open-source / commercial sites, the first two groups plus every `unknown` entry need explicit user confirmation that the distribution model permits them. Combine with CVE in one pass via `--scanners vuln,license`. |
 | **IaC misconfig** | Checkov | Trivy config, tfsec | Checkov is the widest-coverage IaC scanner — Terraform, CloudFormation, Kubernetes, Helm, Dockerfile. Trivy's `config` mode covers IaC too and may already be installed for SCA. |
 | **Bring-your-own checklist** | User-supplied config / rules | — | User points at their own Semgrep rules, CodeQL query pack, or other config — the skill runs whichever primary tool fits. |
 
@@ -92,9 +93,9 @@ codeql database analyze <db-path> <query-suite> --format=sarif-latest --output=<
 
 **Duration:** small JS/TS projects a few minutes; medium projects tens of minutes; large monorepos an hour or more. Run in the background.
 
-## Trivy — SCA and dependency CVE scanning
+## Trivy — SCA, dependency CVE, and license scanning
 
-**What it covers:** scans filesystems, containers, SBOMs, and git repos for dependency vulnerabilities (CVE-tagged by severity), secrets, and IaC misconfigs. Single binary, no runtime dependency.
+**What it covers:** scans filesystems, containers, SBOMs, and git repos for dependency vulnerabilities (CVE-tagged by severity), dependency licenses, secrets, and IaC misconfigs. Single binary, no runtime dependency.
 
 **Install:** via a system package manager (`brew install trivy`, `apt install trivy`, `scoop install trivy`) or download the prebuilt binary from the official Trivy releases.
 
@@ -108,7 +109,27 @@ trivy fs \
   <project-root>
 ```
 
-Add `--scanners vuln,secret` to also scan for leaked secrets, or `--scanners vuln,misconfig` for IaC misconfig in the same run.
+**Invocation for dependency license audit:**
+```bash
+trivy fs \
+  --scanners license \
+  --format json \
+  --output <license-output-path> \
+  <project-root>
+```
+
+**Invocation for CVE + license in one pass (recommended when either framework is in scope):**
+```bash
+trivy fs \
+  --scanners vuln,license \
+  --format json \
+  --output <combined-output-path> \
+  <project-root>
+```
+
+License findings are richer in JSON than in SARIF — emit JSON when licenses are in scope and parse the `Licenses` array per package. Each license is classified by Trivy as `restricted` (GPL / AGPL / LGPL copyleft), `reciprocal` (Mozilla-class weak copyleft), `permissive` (MIT / Apache / BSD / ISC), or `unknown`.
+
+Add `--scanners vuln,secret` to also scan for leaked secrets, or `--scanners vuln,misconfig` for IaC misconfig in the same run. Trivy also surfaces packages whose upstream has reached end-of-life (EOL) alongside CVE findings — call these out even when no CVE is currently filed, because an unmaintained package is a forward-looking risk.
 
 **Duration:** fast — typically under a minute for small-to-medium projects. Can run synchronously without the background-launch pattern.
 

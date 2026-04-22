@@ -72,7 +72,8 @@ Use `AskUserQuestion` to ask which framework to assess against. The supported op
 | CWE / CWE Top 25 (SAST) | Source-code weaknesses tagged with CWE IDs; the CWE Top 25 list specifically flags the most critical classes. |
 | OWASP Top 10 (SAST aspect) | Source-code findings tagged with OWASP Top 10 categories. For the DAST aspect — runtime vulnerabilities — delegate to `/security-scan`. |
 | OWASP ASVS | Findings tagged against OWASP Application Security Verification Standard control sections. |
-| CVE / dependency vulnerabilities (SCA) | Vulnerabilities in third-party dependencies, tagged by CVE ID and severity. |
+| CVE / dependency vulnerabilities (SCA) | Vulnerabilities in third-party dependencies, tagged by CVE ID and severity. Trivy also surfaces packages whose upstream has reached end-of-life ("deprecated" / EOL) alongside the CVEs. |
+| Dependency license audit | Licenses declared by each third-party dependency, flagging copyleft (GPL / AGPL / LGPL) and "unknown / unclassified" entries so the user can confirm the site's distribution model permits them. Important for non-open-source / commercial sites. |
 | IaC misconfiguration | Misconfigurations in infrastructure-as-code (Terraform, CloudFormation, Kubernetes, Helm, Dockerfile). |
 | Bring-your-own checklist | User-supplied Semgrep rules, CodeQL query pack, or custom config. |
 
@@ -92,6 +93,7 @@ Include the typical duration and whether the scan blocks the session when propos
 | OWASP Top 10 (SAST) | Semgrep | CodeQL (loses direct OWASP tags — findings come CWE-tagged only) | Same as above | SAST — **background** |
 | OWASP ASVS | Semgrep | — | Same as above | SAST — **background** |
 | CVE / SCA | Trivy | — (user can name another if they prefer) | Typically under a minute | SCA — **synchronous** (Phase 5 waits) |
+| Dependency license audit | Trivy | — | Typically under a minute; can be combined with CVE in one Trivy call | SCA — **synchronous** |
 | IaC misconfig | Checkov | Trivy's `config` mode | Typically under a minute | IaC — **synchronous** |
 | Bring-your-own | Whichever tool fits the user's rules / query pack | — | Depends on the chosen tool — quote the primary-tool row above | Depends |
 
@@ -123,6 +125,8 @@ Gather the scan configuration. Show the user what you propose; get explicit appr
 | Semgrep | General security | `p/security-audit` or `p/ci` |
 | CodeQL | CWE / OWASP (SAST) | `codeql/javascript-queries:codeql-suites/javascript-security-extended.qls` |
 | Trivy | CVE / SCA | `--scanners vuln` (default filesystem scan) |
+| Trivy | Dependency license audit | `--scanners license` (filesystem scan, license-only output) |
+| Trivy | CVE + license combined | `--scanners vuln,license` (single Trivy call, both concerns covered in one pass) |
 | Checkov | IaC misconfig | (no flag — runs all checks by default) |
 
 For the language detection step (CodeQL path), run:
@@ -165,7 +169,7 @@ Then jump to Phase 6 with what you have — the parse command is the follow-up.
 
 **SCA (Trivy) and IaC (Checkov) — fast, run synchronously.**
 
-Trivy:
+Trivy for CVE-only:
 ```bash
 trivy fs \
   --scanners vuln \
@@ -174,6 +178,26 @@ trivy fs \
   --output <sarif-path> \
   <project-root>
 ```
+
+Trivy for license-only (dependency license audit):
+```bash
+trivy fs \
+  --scanners license \
+  --format json \
+  --output <license-output-path> \
+  <project-root>
+```
+
+Trivy for both CVE + license in one pass (recommended when the user chose either framework — covers both with a single walk of the dependency tree):
+```bash
+trivy fs \
+  --scanners vuln,license \
+  --format json \
+  --output <combined-output-path> \
+  <project-root>
+```
+
+License output is richer in JSON than SARIF (SARIF lacks a clean license-finding shape), so emit JSON when licenses are in scope and parse the `Licenses` array per package. Findings of interest: any license classified `restricted` or `reciprocal` by Trivy (GPL / AGPL / LGPL families), plus any entries with `unknown` / unclassified licenses — those need the user to confirm they have commercial rights.
 
 Checkov:
 ```bash
@@ -203,7 +227,8 @@ Present to the user:
    - **Semgrep + OWASP Top 10**: Semgrep tags `owasp:A01:2021` etc. directly. Organize findings by the OWASP tag; if a finding has no OWASP tag, list it under the rule id instead.
    - **Semgrep + CWE Top 25 / ASVS**: Organize by the relevant tag (`cwe:CWE-NNN`, `asvs:v*.*.*`).
    - **CodeQL**: Organize by the CWE tag in `external/cwe/cwe-NNN`. If the user asked for OWASP Top 10, note that CodeQL tags CWE not OWASP — list findings under CWE and let the user map if they want.
-   - **Trivy**: Organize by CVE severity (CRITICAL / HIGH / MEDIUM / LOW) and package name.
+   - **Trivy CVE / SCA**: Organize by CVE severity (CRITICAL / HIGH / MEDIUM / LOW) and package name. Call out any EOL / deprecated upstreams Trivy reports alongside CVEs — an unmaintained package is a forward-looking risk even when no CVE is currently filed.
+   - **Trivy license audit**: Group by license family (`restricted` → copyleft like GPL / AGPL / LGPL; `reciprocal` → Mozilla-class weak copyleft; `permissive` → MIT / Apache / BSD; `unknown`). For a commercial / non-open-source site, the first two groups plus every `unknown` entry require explicit user confirmation that the distribution model permits them.
    - **Checkov**: Organize by IaC resource type (Terraform resource, K8s kind, etc.).
 4. **Action hints** — for each prominent finding, briefly note the remediation direction (e.g. "parameterize queries" for injection, "pin / upgrade the package" for CVE, "set the Terraform resource's encryption flag" for misconfig). Keep these terse.
 
