@@ -50,7 +50,7 @@ Authenticated-page scanning (where the scanner signs in as a user to test auth-g
 - **Security score is raw, not a grade.** The underlying value is `{ totalRules, succeededRules }` from the most recent completed deep scan. The skill displays a human-readable percentage as a convenience, but the raw pair is the source of truth.
 - **Trial / developer / non-production sites cannot be scanned.** The service rejects with `A010` (invalid state) — same exit code as malformed arguments, so the skill cannot auto-classify. Surface the stderr message verbatim so the user can see what's blocking.
 - **Rate limits apply.** There are daily and weekly caps on scans per site. When exceeded, the service returns a generic server error (exit 1 / transport). Wait and retry later is the only mitigation — this cap is not configurable from here.
-- **A fresh site with no completed deep scan has no report and no score.** `--report` and `--score` both surface that as a distinct stderr message and exit code 1 (the underlying request returns a 500). Run a deep scan first.
+- **A fresh site with no completed deep scan has no report and no score.** `--report` and `--score` both surface that as a distinct stderr message and exit code 1. Run a deep scan first.
 - **Report delivery through this skill is structured JSON, not a PDF.** The Studio interface offers a PDF download of the summary report; the skill fetches the machine-readable structured version. If the user wants the PDF specifically, tell them to use Studio.
 
 ## Workflow

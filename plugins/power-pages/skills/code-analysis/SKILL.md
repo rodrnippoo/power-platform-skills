@@ -2,23 +2,22 @@
 name: code-analysis
 description: >-
   Runs static security analysis on a Power Pages site's source code
-  against a chosen security framework — CWE / CWE Top 25, OWASP Top
-  10 (SAST aspect), OWASP ASVS, CVE dependency vulnerabilities, or
-  IaC misconfiguration. Scoped to JavaScript / TypeScript source —
-  the typical Power Pages code-site surface. Selects the appropriate
-  tool for the framework: Semgrep for CWE / OWASP / ASVS SAST,
-  CodeQL for deep JS/TS dataflow analysis, Trivy for dependency /
-  SCA, Checkov for IaC. Use when the user mentions static analysis,
-  SAST, SCA,
-  dependency scan, Semgrep, CodeQL, Trivy, Checkov, CWE, CVE,
-  OWASP scan of source code, ASVS, IaC security, or wants to check
-  whether their code has security flaws against a specific framework
-  — even if they do not use the phrase "static analysis". SAST
-  scans are long-running and run in the background. Out of scope:
-  dynamic / runtime scanning (use `/security-scan`), cloud
-  infrastructure compliance (NIST / PCI / HIPAA / SOC 2 / CIS — use
-  Prowler / OpenSCAP directly), mobile app scanning, LLM vulnerability
-  scanning, threat modeling, and adversary emulation.
+  against a chosen framework — CWE / CWE Top 25, OWASP Top 10 (SAST
+  aspect), OWASP ASVS, CVE dependency vulnerabilities, or IaC
+  misconfiguration. Scoped to JavaScript / TypeScript source — the
+  typical Power Pages code-site surface. Picks the appropriate
+  tool: Semgrep for CWE / OWASP / ASVS SAST, CodeQL for deep JS/TS
+  dataflow, Trivy for dependency / SCA, Checkov for IaC. Use when
+  the user mentions static analysis, SAST, SCA, dependency scan,
+  Semgrep, CodeQL, Trivy, Checkov, CWE, CVE, OWASP scan of source
+  code, ASVS, IaC security, or wants to check source code for
+  security flaws against a specific framework — even if they do not
+  use the phrase "static analysis". SAST scans are long-running
+  and run in the background. Out of scope: dynamic / runtime
+  scanning (use /security-scan), cloud infrastructure compliance
+  (NIST / PCI / HIPAA / SOC 2 / CIS — use Prowler / OpenSCAP),
+  mobile, LLM vulnerability scanning, threat modeling, adversary
+  emulation.
 user-invocable: true
 argument-hint: "[optional: framework name or tool name]"
 allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList

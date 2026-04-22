@@ -76,7 +76,7 @@ semgrep scan \
 
 **What it covers:** deep dataflow-based SAST for JavaScript, TypeScript, Python, Java, C#, C/C++, Go, Ruby, Swift. Rules are CWE-tagged but NOT OWASP-tagged; if the user wants findings organized by OWASP category, use Semgrep instead.
 
-**Install:** download the CodeQL CLI binary archive for your platform from the official GitHub maintainer-hosted release, unpack to a stable location (e.g., `~/codeql` or `C:\tools\codeql`), and add the directory containing the `codeql` executable to PATH.
+**Install:** download the CodeQL CLI binary archive for your platform from the official GitHub maintainer-hosted release, unpack to a stable location (e.g., `~/codeql` on macOS / Linux or `C:/tools/codeql` on Windows), and add the directory containing the `codeql` executable to PATH.
 
 **Licensing:** the CodeQL CLI is free for analyzing open-source codebases and for GitHub code scanning; other uses may require a separate license. The user is responsible for compliance — the skill orchestrates; it does not bundle or redistribute the CLI.
 

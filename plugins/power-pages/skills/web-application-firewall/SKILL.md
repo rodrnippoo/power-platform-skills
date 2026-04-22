@@ -150,7 +150,7 @@ Or, if another operation of the same kind is already in flight:
 
 Move directly to Phase 5 to poll. Do not claim success based on acceptance alone.
 
-`--create-rules` is synchronous — a `200 OK` response body echoes the applied rule set.
+`--create-rules` is synchronous — on success the command exits `0` with the applied rule set echoed on stdout.
 
 **Error handling**
 
@@ -176,7 +176,7 @@ For **async operations** (`--enable`, `--disable`, `--delete-custom`), poll ever
 
 If convergence has not happened within 5 minutes, do not claim success — show the user the current state, note that the admin layer is still settling, and ask how to proceed.
 
-For the **sync operation** (`--create-rules`), the 200 response body already contains the applied rule set. Verify the submitted rules are present in it. A separate `--rules` call is redundant.
+For the **sync operation** (`--create-rules`), the command's stdout already contains the applied rule set. Verify the submitted rules are present in it. A separate `--rules` call is redundant.
 
 **Edge propagation** (full global rollout) can take up to an hour for any rule change. Tell the user this explicitly. The skill does not wait for edge propagation — it stops at admin-layer convergence.
 

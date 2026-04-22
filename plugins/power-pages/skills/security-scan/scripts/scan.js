@@ -48,6 +48,12 @@ const CATALOGUED_EXIT = Object.freeze({
   A010: EXIT.INVALID_STATE,
 });
 
+// Default caller-side wait before the first --ongoing poll after a successful
+// deep-scan start. The service does not emit Retry-After for deep-scan start,
+// so this is the skill's recommended cadence rather than a service-supplied
+// value. 60 seconds matches the plugin-wide admin-API poll interval.
+const DEEP_SCAN_DEFAULT_RETRY_AFTER_SECONDS = 60;
+
 const HELP = `Usage:
   scan.js --<mode> --portalId <guid> [mode flags] [--dry-run]
   scan.js --help
@@ -73,15 +79,33 @@ Common flags:
   --portalId <guid>                        Power Pages portal id (REQUIRED).
                                            Resolve via scripts/lib/website.js
                                            first — NOT the website record id.
-  --dry-run                                For writes (--deep): validate
-                                           locally, skip the network request.
+  --dry-run                                For writes (--deep only): validate
+                                           --portalId locally and return the
+                                           would-be poll command / wait
+                                           interval without contacting the
+                                           service. stdout:
+                                           { "dryRun": true,
+                                             "operation": "startDeepScan",
+                                             "portalId": "<guid>",
+                                             "wouldPoll": "scan.js --ongoing
+                                                 --portalId <guid>",
+                                             "wouldWaitSeconds": 60 }
+                                           No-op for read modes.
   -h, --help                               Show this help.
 
 Output:
-  stdout  JSON result on success. --deep returns { "accepted": true } on
-          acceptance or { "accepted": false, "alreadyOngoing": true } if a
-          scan is already running. No operation_location is emitted — the
-          service does not provide one for deep scans; poll --ongoing.
+  stdout  JSON result on success. --deep returns the async-handoff shape:
+          { "accepted": true,
+            "operation_location": null,
+            "retry_after_seconds": 60,
+            "poll_command": "scan.js --ongoing --portalId <guid>" }
+          operation_location is null because the service does not emit a
+          poll URL for deep-scan start — poll via the poll_command instead.
+          When a scan is already running, --deep returns:
+          { "accepted": false, "alreadyOngoing": true, <same async fields> }
+          --quick returns an array of pass/warn/error items. --ongoing
+          returns a boolean. --report and --score return the structured
+          report / score objects from the service.
   stderr  Diagnostics, transient-retry notices, and catalogued service
           error codes (A001 / A010 / Z003) when applicable.
 
@@ -170,10 +194,23 @@ async function runQuickScan({ portalId, lcid, environmentId, cloud, deps } = {})
 
 /**
  * Start an async deep scan against the site's public surface (anonymous).
- * Server accepts with 202 and runs for an extended period server-side.
- * Returns { accepted: true } on acceptance, or
- * { accepted: false, alreadyOngoing: true } when a scan is already running
- * (Z003 surfaces as HTTP 204).
+ * The service accepts the start asynchronously and runs the scan server-side
+ * for an extended period.
+ *
+ * Output shape follows the plugin's async-handoff contract:
+ *   { accepted, operation_location, retry_after_seconds, poll_command }
+ * Where:
+ *   - accepted                — true on acceptance, false if a scan is
+ *                               already ongoing (Z003)
+ *   - operation_location      — null, because the service does not provide
+ *                               a service-side poll URL for this operation;
+ *                               callers poll via the poll_command below
+ *   - retry_after_seconds     — recommended wait before the first --ongoing
+ *                               poll; honors the plugin-wide admin-API cadence
+ *   - poll_command            — the exact command a caller runs to check
+ *                               progress
+ *   - alreadyOngoing          — present and true only when a scan was already
+ *                               running when start was attempted
  *
  * This function does not accept credentials — authenticated-page scanning
  * is intentionally out of scope here; use the Power Pages Studio interface
@@ -182,6 +219,12 @@ async function runQuickScan({ portalId, lcid, environmentId, cloud, deps } = {})
  */
 async function startDeepScan({ portalId, environmentId, cloud, deps } = {}) {
   requirePortalId(portalId);
+  const pollCommand = `scan.js --ongoing --portalId ${portalId}`;
+  const asyncHandoff = {
+    operation_location: null,
+    retry_after_seconds: DEEP_SCAN_DEFAULT_RETRY_AFTER_SECONDS,
+    poll_command: pollCommand,
+  };
   const res = await callAdminApi({
     method: 'POST',
     operation: 'scan/deep/start',
@@ -191,10 +234,10 @@ async function startDeepScan({ portalId, environmentId, cloud, deps } = {}) {
     deps,
   });
   if (isAlreadyOngoing(res)) {
-    return { accepted: false, alreadyOngoing: true };
+    return { accepted: false, alreadyOngoing: true, ...asyncHandoff };
   }
   throwWithCode('startDeepScan', res);
-  return { accepted: true };
+  return { accepted: true, ...asyncHandoff };
 }
 
 /**
@@ -319,7 +362,13 @@ async function runMode(mode, args) {
     case 'deep': {
       if (args['dry-run']) {
         requirePortalId(args.portalId);
-        return { dryRun: true, operation: 'startDeepScan', portalId: args.portalId };
+        return {
+          dryRun: true,
+          operation: 'startDeepScan',
+          portalId: args.portalId,
+          wouldPoll: `scan.js --ongoing --portalId ${args.portalId}`,
+          wouldWaitSeconds: DEEP_SCAN_DEFAULT_RETRY_AFTER_SECONDS,
+        };
       }
       return startDeepScan({ portalId: args.portalId });
     }

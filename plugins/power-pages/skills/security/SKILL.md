@@ -1,27 +1,23 @@
 ---
 name: security
 description: >-
-  Orchestrates an end-to-end security review of a Power Pages site —
-  asks which security framework to assess against (OWASP Top 10,
-  CWE / CWE Top 25, OWASP ASVS, CVE / dependency vulnerabilities,
-  IaC misconfiguration, or a bring-your-own checklist) and which
-  long-running scans to include (ZAP deep dynamic scan, Semgrep or
-  CodeQL SAST, Trivy SCA, Checkov IaC — recommended tools are
-  pre-selected, user can uncheck); runs the posture snapshot and
-  selected scans; presents findings in a unified HTML report
-  grouped by the framework's own categories; and applies
-  remediations with per-change user approval by delegating to the
-  skill that owns the concern (site-visibility,
+  Orchestrates an end-to-end security review of a Power Pages site.
+  Asks which framework to assess against (OWASP Top 10, CWE / CWE
+  Top 25, OWASP ASVS, CVE / dependency vulnerabilities, IaC
+  misconfiguration, or a bring-your-own checklist) and which
+  long-running scans to include (ZAP deep scan, Semgrep or CodeQL
+  SAST, Trivy SCA, Checkov IaC — recommended tools pre-selected);
+  runs the posture snapshot plus selected scans; presents findings
+  in a unified HTML report grouped by the framework's categories;
+  applies remediations with per-change approval, delegating to the
+  skill that owns each concern (site-visibility,
   web-application-firewall, security-headers, security-scan,
   code-analysis, setup-auth, create-webroles, audit-permissions,
   deploy-site). Use when the user asks for a security review,
-  security audit, security posture check, OWASP assessment,
-  hardening sweep, or wants to see every security signal the plugin
-  can surface — even if they do not name a specific framework. Out
-  of scope: running any individual check in isolation (invoke that
-  skill directly), and compliance against frameworks other than
-  the ones listed above (cloud / NIST / PCI / HIPAA compliance
-  requires dedicated tooling outside this plugin).
+  audit, posture check, OWASP assessment, or hardening sweep —
+  even if they do not name a framework. Out of scope: single-check
+  invocations (invoke that skill directly) and compliance
+  frameworks beyond the ones listed.
 user-invocable: true
 argument-hint: "[optional: focus area, e.g. 'full review' or 'only CSP']"
 allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
@@ -88,9 +84,9 @@ If the user asks "which should I pick", OWASP Top 10 is the most common for gene
 
 Look up the applicable tools for the framework the user chose in `references/orchestration.md` → "Framework → scan tools". Present every applicable tool for that framework — do NOT hide tools the user might want. Pre-check the recommended ones (marked "recommended" in the reference table); the user can uncheck any they do not want.
 
-If the user unchecks everything, confirm explicitly before proceeding. Spell out what the review WILL still perform and what it will MISS, using the current framework's context:
+Label the skip-all path **"Bypass long-running scans (not recommended)"** in the `AskUserQuestion` UI — the phrase "not recommended" MUST appear so the user sees the posture trade-off before they commit. If the user picks it, confirm explicitly before proceeding. Spell out what the review WILL still perform and what it will MISS, using the current framework's context:
 
-> With no long-running scans, the review will still perform these fast checks from the posture snapshot:
+> **Bypassing long-running scans is not recommended.** With no long-running scans, the review will still perform these fast checks from the posture snapshot:
 > - Site visibility (Public / Private)
 > - Web Application Firewall status + custom rule audit
 > - HTTP security-header configuration (CSP, CORS, SameSite, X-Frame-Options) via `security-headers --audit`

@@ -95,16 +95,27 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/security-scan/scripts/scan.js" \
 
 **Response**
 
-On acceptance (`202`):
+On acceptance, the script emits the plugin's async-handoff shape:
 ```json
-{ "accepted": true }
+{
+  "accepted": true,
+  "operation_location": null,
+  "retry_after_seconds": 60,
+  "poll_command": "scan.js --ongoing --portalId <guid>"
+}
 ```
 
-Unlike the WAF async commands, the scan-start response does not carry an `operation_location` or a `retry_after_seconds` — there is no dedicated progress URL. Callers poll the companion `--ongoing` command to observe completion.
+`operation_location` is `null` because the service does not emit a service-side poll URL for deep-scan start. The caller polls via `poll_command` (the skill's `--ongoing` mode) after waiting at least `retry_after_seconds` seconds; the 60-second default matches the plugin-wide admin-API poll cadence and is declared as `DEEP_SCAN_DEFAULT_RETRY_AFTER_SECONDS` in `scan.js`.
 
-If a scan is already running on the site:
+If a scan is already running on the site, the same async-handoff fields are returned along with an `alreadyOngoing` flag so the caller can distinguish "just started" from "already in flight":
 ```json
-{ "accepted": false, "alreadyOngoing": true }
+{
+  "accepted": false,
+  "alreadyOngoing": true,
+  "operation_location": null,
+  "retry_after_seconds": 60,
+  "poll_command": "scan.js --ongoing --portalId <guid>"
+}
 ```
 
 **Errors**: `A001`, `Z003` (already ongoing — surfaces as exit 4, distinct from transport failures), `A010` (trial / developer / non-production site state, or bad arguments).
