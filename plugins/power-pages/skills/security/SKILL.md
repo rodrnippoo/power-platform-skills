@@ -2,12 +2,16 @@
 name: security
 description: >-
   Orchestrates an end-to-end security review of a Power Pages site —
-  assesses the current posture and organizes findings however the
-  user prefers (OWASP Top 10 categories, severity-ordered, by
-  security area, a bring-your-own checklist, or a focused scope on
-  specific areas); presents findings in a unified HTML report; and
-  applies remediations with per-change user approval by delegating
-  to the skill that owns the concern (site-visibility,
+  asks which security framework to assess against (OWASP Top 10,
+  CWE / CWE Top 25, OWASP ASVS, CVE / dependency vulnerabilities,
+  IaC misconfiguration, or a bring-your-own checklist) and which
+  long-running scans to include (ZAP deep dynamic scan, Semgrep or
+  CodeQL SAST, Trivy SCA, Checkov IaC — recommended tools are
+  pre-selected, user can uncheck); runs the posture snapshot and
+  selected scans; presents findings in a unified HTML report
+  grouped by the framework's own categories; and applies
+  remediations with per-change user approval by delegating to the
+  skill that owns the concern (site-visibility,
   web-application-firewall, security-headers, security-scan,
   code-analysis, setup-auth, create-webroles, audit-permissions,
   deploy-site). Use when the user asks for a security review,
@@ -16,8 +20,8 @@ description: >-
   can surface — even if they do not name a specific framework. Out
   of scope: running any individual check in isolation (invoke that
   skill directly), and compliance against frameworks other than
-  OWASP (cloud / NIST / PCI / HIPAA compliance requires dedicated
-  tooling outside this plugin).
+  the ones listed above (cloud / NIST / PCI / HIPAA compliance
+  requires dedicated tooling outside this plugin).
 user-invocable: true
 argument-hint: "[optional: focus area, e.g. 'full review' or 'only CSP']"
 allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
@@ -41,8 +45,8 @@ Every change is one delegated invocation behind explicit user approval — no ba
 - **Framework-driven, not tool-driven.** OWASP is a framework. `security-scan` (ZAP-based dynamic scan) is a tool that covers *a subset* of OWASP. Running ZAP alone is not an OWASP review. Known ZAP gaps include design-time intent (table-permission misuse) and network-level checks — cover those via `/audit-permissions` and the posture snapshot.
 - **Delegate table-permission audits; do not reimplement them.** `/audit-permissions` already produces an HTML report at `docs/permissions-audit.html` with severity-grouped findings and delegates fixes to the `table-permissions-architect` agent. This skill INCLUDES those findings in the unified report and keeps a link back to the existing `permissions-audit.html` for deep-dive evidence. Do NOT parse permission YAML or re-query Dataverse from here.
 - **Auth / role remediations go through their own skills.** When the review surfaces an auth issue, the fix invokes `/setup-auth`. Role-based access fixes invoke `/create-webroles`. These skills have their own approval flows — do not bypass them with direct Dataverse writes.
-- **Long-running security checks do NOT block.** `/security-scan --deep` and `/code-analysis` SAST scans run in the background. If the user wants them included in the review, start them early (Phase 3 or 4) and let them run while the rest of the review proceeds. The HTML report shows partial results immediately; deeper findings append when the scans complete.
-- **Bypass option for long-running scans is explicitly labeled "not recommended".** If the user wants to skip deep-scan or static code analysis for a review, surface the trade-off: "Bypassing means the review may miss OWASP A03 (injection), A10 (SSRF), and similar dataflow-derived findings." Accept the bypass if they confirm, and note it in the report.
+- **Long-running security checks do NOT block.** `/security-scan --deep` and `/code-analysis` SAST scans run in the background. Kick them off in Phase 3 as soon as the user has picked them in Phase 2, and let them run while the rest of the review proceeds. The HTML report shows partial results immediately; deeper findings append when the scans complete.
+- **Skip-all must be explicit and documented.** If the user unchecks every long-running scan in Phase 2, surface the concrete trade-off (the review will miss dynamic vulnerability findings, SAST dataflow findings, dependency CVEs, and IaC misconfigurations depending on which were unchecked — see Phase 2 for the exact disclosure text). Accept the skip if the user confirms, and note it in the report's "Framework used" header so the gap is visible to later readers.
 - **Cross-cloud runtime sources.** When proposing CSP remediations in Phase 6, remember `/security-headers` needs the cloud-specific `content.powerapps.*` host — never propose a remediation that lists all four clouds' hosts together. Delegate to `/security-headers` which handles this.
 - **Per-change approval is mandatory.** Phase 6 pauses with `AskUserQuestion` before every remediation. The user can accept, skip, or defer each finding individually — never batch-approve.
 
@@ -63,21 +67,47 @@ At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_p
    - Non-zero exit with a prerequisite message → surface verbatim, stop. Do not install or re-authenticate on the user's behalf.
    - Exit 0 with `null` → site not deployed OR PAC profile pointed at the wrong environment. Ask which applies before recovering.
 
-### Phase 2 — Agree on the review's scope and finding layout
+### Phase 2 — Select the framework and scans to include
 
-Use `AskUserQuestion`. Use plain, user-friendly labels — avoid internal terms like "sub-skill", "grouping", or phase numbers in option text. Do NOT pre-select an option; let the user pick based on their context.
+Ask two questions sequentially with `AskUserQuestion`. Use plain, user-friendly labels — avoid internal terms like "sub-skill", phase numbers, or internal categorization vocabulary in option text.
 
-Offer these five ways to lay out findings in the final report (each optimized for a different use case):
+**Question 1 — Which security framework should this review assess against?** Single-select. The framework drives both which scan tools are relevant AND how findings are organized in the final report, so findings group themselves automatically by the framework's own categories (A01–A10 for OWASP Top 10, CWE-NNN for CWE, etc.). Do NOT ask the user separately how to lay out the report — the framework answer covers both.
 
-1. **OWASP Top 10** — findings organized into OWASP Top 10 categories (A01–A10). Familiar framing for posture reviews and compliance conversations.
-2. **By severity** — flat list ordered Critical → High → Medium → Passing. Fastest path to "what should I fix first".
-3. **By security area** — findings organized by the kind of security concern: access control, web application firewall, HTTP headers, dynamic scan, table permissions, code analysis. Maps directly to how each finding gets fixed.
-4. **Custom checklist** — you provide a checklist file (markdown, text, or YAML) or paste one inline. Each checklist item becomes a section in the report.
-5. **Focused scope** — tell me one or two specific areas to review (e.g., "only CSP and WAF rules"). I scope the review to exactly that.
+| Framework | What it covers |
+|---|---|
+| OWASP Top 10 | General posture review combining dynamic (runtime) and static (source) findings tagged A01–A10. Familiar framing for compliance conversations. |
+| CWE / CWE Top 25 | Source-code and runtime findings tagged with CWE IDs; the Top 25 flags the most critical classes. |
+| OWASP ASVS | Findings tagged against OWASP Application Security Verification Standard control sections. |
+| CVE / dependency vulnerabilities (SCA) | Third-party dependency vulnerabilities tagged by CVE and severity. |
+| IaC misconfiguration | Infrastructure-as-code misconfigurations (Terraform, CloudFormation, Kubernetes, Helm, Dockerfile). |
+| Bring-your-own checklist | User-supplied checklist (markdown / text / YAML) or tool config (Semgrep rules, CodeQL query pack). |
 
-If the user isn't sure which to pick, briefly surface the trade-off (OWASP for compliance conversations; severity for triage; area for fix-path clarity; checklist for internal standards) and ask again. Don't push them toward OWASP by default — a security review should fit their question, not impose an abstraction.
+If the user asks "which should I pick", OWASP Top 10 is the most common for general posture reviews — but do not pre-select it.
 
-Record the chosen layout — Phase 4 organizes findings accordingly and Phase 5 renders the report using the chosen scheme.
+**Question 2 — Which long-running scans should the review include?** Multi-select. Long-running scans take minutes to hours; they run in the background while the rest of the review proceeds, and results fold into the report when they complete.
+
+Look up the applicable tools for the framework the user chose in `references/orchestration.md` → "Framework → scan tools". Present every applicable tool for that framework — do NOT hide tools the user might want. Pre-check the recommended ones (marked "recommended" in the reference table); the user can uncheck any they do not want.
+
+If the user unchecks everything, confirm explicitly before proceeding. Spell out what the review WILL still perform and what it will MISS, using the current framework's context:
+
+> With no long-running scans, the review will still perform these fast checks from the posture snapshot:
+> - Site visibility (Public / Private)
+> - Web Application Firewall status + custom rule audit
+> - HTTP security-header configuration (CSP, CORS, SameSite, X-Frame-Options) via `security-headers --audit`
+> - Table permissions (via `/audit-permissions`)
+> - Project language detection
+>
+> You will NOT get:
+> - Dynamic vulnerability findings (injection, SSRF, TLS misconfig, confirmed exploits) — these require the ZAP deep dynamic scan
+> - Static-code dataflow findings (CWE-79 XSS, CWE-89 SQL injection, CWE-78 command injection, and similar classes) — these require a SAST scan (Semgrep or CodeQL)
+> - Third-party dependency CVEs — these require Trivy
+> - IaC misconfigurations — these require Checkov
+>
+> Confirm you want to proceed without any long-running scans.
+
+List only the bullets that correspond to unchecked tools — do not dump all four bullets if only two scans were unchecked. If the user picks a framework whose only tooling is long-running (e.g., CVE / SCA, where Trivy IS the review), tell them the review has nothing to report without the scan and ask whether they want to re-select Trivy or change the framework.
+
+Record the framework and the scan set — Phase 3 kicks off the selected scans in the background, Phase 4 organizes findings by the framework's categories, and Phase 5 renders the report using the framework-native layout.
 
 ### Phase 3 — Discover current posture
 
@@ -102,19 +132,30 @@ Also invoke the existing table-permissions flow in parallel:
 ```
 This produces `docs/permissions-audit.html`. Wait for that skill to complete before Phase 4 — its findings are load-bearing for the unified report.
 
-**Do NOT kick off a deep dynamic scan (`/security-scan --deep`) or a SAST scan (`/code-analysis`) here unconditionally.** Ask in Phase 2 whether to include them (long-running), and if yes, start them NOW so they run in the background while Phase 4–5 proceed. Completion will be surfaced by the registered hooks; pick up results when they arrive.
+**Kick off every long-running scan the user picked in Phase 2, in the background, before proceeding to Phase 4.** Do NOT run any scan the user unchecked. The selected scans typically map to:
+
+- ZAP deep dynamic scan → `node "${CLAUDE_PLUGIN_ROOT}/skills/security-scan/scripts/scan.js" --deep --portalId <guid>` (returns immediately; runs server-side)
+- Semgrep SAST → `semgrep scan --config <ruleset> --sarif --output <sarif-path> <project-root>` via `Bash run_in_background: true`
+- CodeQL SAST → `node "${CLAUDE_PLUGIN_ROOT}/skills/code-analysis/scripts/run-codeql.js" --projectRoot <path> --language javascript-typescript --querySuite <suite> --sarifOut <sarif-path>` via `Bash run_in_background: true`
+- Trivy SCA → `trivy fs --scanners vuln --format sarif --output <sarif-path> <project-root>` (usually sub-minute; can run synchronously)
+- Checkov IaC → `checkov -d <project-root> --output sarif --output-file-path <sarif-path>` (sub-minute; can run synchronously)
+
+Ruleset / query-suite defaults follow the framework — see `skills/code-analysis/SKILL.md` Phase 4 (ruleset table) for the exact mapping. The scan completion hook at `plugins/power-pages/hooks/hooks.json` will surface results when the long-running scans finish; pick them up and fold into the report during Phase 5 or Phase 7.
 
 ### Phase 4 — Audit and analyze
 
-For each signal gathered in Phase 3, classify it as Critical / High / Medium or Passing check per the severity scheme in `references/orchestration.md`. Then organize findings according to whichever layout the user picked in Phase 2:
+For each signal gathered in Phase 3, classify it as Critical / High / Medium or Passing check per the severity scheme in `references/orchestration.md`. Then organize findings by the framework chosen in Phase 2 — the framework is the organizing principle, not a separate layout decision.
 
 - **OWASP Top 10** — use the category → area mapping in `references/orchestration.md`. Each finding falls into A01–A10 based on the signal's source and nature.
-- **By severity** — no per-category bucketing; sort findings by severity (Critical → High → Medium) and group the passing checks at the end.
-- **By security area** — bucket by source area (access control / web application firewall / HTTP headers / dynamic scan / table permissions / code analysis). Each area maps to the skill that owns the fix.
-- **Custom checklist** — decide which checklist item each signal fulfills or violates. Each checklist item becomes a bucket; findings land in the matching bucket with their severity and evidence.
-- **Focused scope** — restrict the review to the areas the user described; drop other signals from the report. Within the scope, organize by whichever sub-structure fits (usually by security area).
+- **CWE / CWE Top 25** — group by the CWE id on the finding. Posture-snapshot signals (WAF disabled, missing CSP, etc.) do not have native CWE ids; place them under the best-fit CWE (e.g., missing CSP → CWE-1021, WAF disabled → CWE-693) and annotate the mapping in the evidence line so the user can see the reasoning.
+- **OWASP ASVS** — group by ASVS section (V1 Architecture, V2 Authentication, V3 Session, V4 Access Control, V5 Validation, …). Semgrep ASVS rules tag directly; posture signals need manual section assignment with evidence annotation.
+- **CVE / SCA** — group by package name, ordered by highest severity CVE per package. The review has nothing useful to say in this framework without the SCA tool (Trivy) — if the tool was unselected, Phase 2 already warned the user.
+- **IaC misconfig** — group by resource type (e.g., Terraform resource, K8s kind, Dockerfile stanza). Same constraint as SCA — if Checkov / Trivy config mode was unselected, there are no findings to report.
+- **Bring-your-own checklist** — each checklist item becomes a bucket. Decide which checklist item each signal fulfills or violates; findings land in the matching bucket with their severity and evidence. Items with no matching signal are flagged as manual-review in the report.
 
-Severity assignment and source-area identification apply regardless of layout. The findings JSON schema in `references/orchestration.md` supports arbitrary category IDs — `categories[].id` is `A01` for OWASP, a slug for checklist items, an area name for by-area layout, `critical` / `high` / `medium` for by-severity, or a custom label for focused scope.
+Severity assignment and source-area identification apply regardless of framework. The findings JSON schema in `references/orchestration.md` supports framework-specific category IDs — `categories[].id` is `A01` for OWASP, `CWE-79` for CWE, `V2.1` for ASVS, the package name for SCA, the resource type for IaC, or the checklist-item slug for bring-your-own.
+
+If the argument-hint captured a focused scope (e.g., "only CSP and WAF"), drop any signals outside the described scope before organizing. The framework still governs how the in-scope findings are grouped.
 
 ### Phase 5 — Present findings in a unified HTML report
 
@@ -127,8 +168,8 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/security/scripts/render-report.js" \
 ```
 
 The report includes, in this order:
-- Executive summary (counts by severity + by OWASP category)
-- Framework used, timestamp, portal id + site name
+- Executive summary (counts by severity + counts by the framework's own category axis — A01–A10 for OWASP, CWE-NNN for CWE, section id for ASVS, package for SCA, resource type for IaC, checklist item for bring-your-own)
+- Framework used, timestamp, portal id + site name, and which long-running scans were included vs. skipped
 - Per-category finding list, each finding showing: description, evidence (what was checked and what was seen), severity, source area, suggested remediation, and status (open / fixed / deferred).
 - **Table-permissions section that INCLUDES the findings from `/audit-permissions`** re-rendered under the unified severity scheme, with a prominent "Full evidence: docs/permissions-audit.html" link back to the original report. Do NOT duplicate the `permissions-audit.html` doc — link to it.
 - Pending long-running results banner: if a deep scan or SAST is still running, the report carries a "Additional findings pending from <scan-type>" notice with the polling command.

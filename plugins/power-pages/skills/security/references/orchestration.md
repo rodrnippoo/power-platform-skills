@@ -4,7 +4,8 @@ Single consolidated reference for the `security` meta-skill — the OWASP catego
 
 ## Contents
 
-- [Finding layout — how findings are organized in the report](#finding-layout--how-findings-are-organized-in-the-report)
+- [Framework → scan tools](#framework--scan-tools)
+- [Framework → report grouping](#framework--report-grouping)
 - [OWASP Top 10 → security area mapping](#owasp-top-10--security-area-mapping)
 - [Full delegation table](#full-delegation-table)
 - [Severity scheme](#severity-scheme)
@@ -13,21 +14,37 @@ Single consolidated reference for the `security` meta-skill — the OWASP catego
 - [Posture snapshot — what each read returns](#posture-snapshot--what-each-read-returns)
 - [Bring-your-own checklist — how to scope](#bring-your-own-checklist--how-to-scope)
 
-## Finding layout — how findings are organized in the report
+## Framework → scan tools
 
-The meta-skill supports five ways to organize findings in the report. The user picks one in Phase 2. Layout choice only affects presentation — it does not change which signals are collected.
+The meta-skill's Phase 2 asks the user which framework to assess against, then asks which long-running scans to include. Use this table to build the multi-select list for the second question: show every applicable tool for the chosen framework, pre-check the "recommended" column entries, and let the user uncheck any they do not want.
 
-When presenting options to the user in Phase 2, use the plain-English labels in the "Label shown to user" column. Internal ids (`by-area`, `by-severity`, etc.) are for `categories[].id` in the findings JSON only.
-
-| Label shown to user | `categories[].id` convention | When it fits | Reference section |
+| Framework | Applicable tools | Recommended (pre-check) | Notes |
 |---|---|---|---|
-| **OWASP Top 10** | `A01`, `A02`, …, `A10` | Compliance conversations, audit framing, cross-team reviews | [OWASP Top 10 → security area mapping](#owasp-top-10--security-area-mapping) |
-| **By severity** | `critical`, `high`, `medium`, `passing` | Triage — "what should I fix first" | Uses the same [severity scheme](#severity-scheme); each severity is a bucket |
-| **By security area** | `site-visibility`, `web-application-firewall`, `security-headers`, `security-scan`, `code-analysis`, `audit-permissions`, `setup-auth`, `create-webroles` | Clear fix path — each area maps directly to the skill that owns the fix (see the [full delegation table](#full-delegation-table)) |
-| **Custom checklist** | Slug of each checklist item (e.g., `verify-csp-set`, `verify-waf-enabled`) | Internal standards, compliance-as-code, teams with their own hardening list | [Bring-your-own checklist](#bring-your-own-checklist--how-to-scope) |
-| **Focused scope** | Whatever labels fit the user's described scope | Narrow asks — "only headers and WAF" | None — use the most fitting area layout inside the scope the user specified |
+| **OWASP Top 10** | ZAP deep dynamic scan; Semgrep with `p/owasp-top-ten` pack; CodeQL with `javascript-security-extended.qls` | ZAP + Semgrep | Semgrep is preferred over CodeQL here because its rules ship with direct `owasp:A0N:*` tags — CodeQL tags only CWE, which means mapping to OWASP has to be done manually. |
+| **CWE / CWE Top 25** | ZAP deep dynamic scan; Semgrep with `p/cwe-top-25`; CodeQL | ZAP + Semgrep | CodeQL is the strong alternative to Semgrep when deep dataflow matters; flag the longer runtime when proposing. |
+| **OWASP ASVS** | Semgrep with `p/owasp-asvs`; ZAP deep dynamic scan for runtime-verification controls | Semgrep | ASVS is primarily a verification standard; most controls are static. Include ZAP only if the user wants runtime verification of session / transport controls. |
+| **CVE / SCA** | Trivy filesystem scan (`--scanners vuln`) | Trivy | SCA is the entire review in this framework — unchecking Trivy leaves the review with nothing to report. Warn the user and ask whether to re-select or switch framework. |
+| **IaC misconfig** | Checkov; Trivy `--scanners config` as an alternative | Checkov | Same constraint as SCA — unchecking both leaves nothing to report. |
+| **Bring-your-own** | Whichever tool the user specifies (Semgrep custom rules, CodeQL query pack, etc.) | User-specified | The user names the tool when they pick this framework; pre-select that tool. |
 
-Whichever layout is chosen, the severity scheme and the source area are still recorded on every finding. The report's executive summary always shows counts by severity regardless of layout, so that information is never lost.
+**Tool availability caveat.** If a recommended tool is not installed on the user's machine (check via `skills/code-analysis/scripts/check-tools.js`), either (a) swap in the framework's alternative if present and call out the trade-off, or (b) surface an install pointer and mark the unavailable tool unchecked-with-reason so the user can see why. Never silently drop a tool from the list.
+
+**Why DAST complements SAST.** For OWASP, CWE, and ASVS frameworks, include the ZAP deep dynamic scan alongside the SAST tool by default: dynamic runtime evidence catches classes SAST cannot (authentication-flow defects, rendered-output XSS, TLS misconfig). Users sometimes uncheck ZAP because it is long-running; let them, but do not default it off.
+
+## Framework → report grouping
+
+The framework the user picks in Phase 2 also determines how findings are grouped in the unified HTML report — there is NO separate "report layout" question. This table is the authoritative map Phase 4 uses to bucket findings and the `categories[].id` convention in the findings JSON.
+
+| Framework | `categories[].id` | How findings are grouped |
+|---|---|---|
+| **OWASP Top 10** | `A01`, `A02`, …, `A10` | Each finding is placed in the OWASP category matching its signal source — see [OWASP Top 10 → security area mapping](#owasp-top-10--security-area-mapping). |
+| **CWE / CWE Top 25** | `CWE-NNN` (the CWE id on the finding) | SAST findings already carry CWE tags; use them. Posture signals without native CWE ids get a best-fit CWE (e.g., missing CSP → CWE-1021, WAF disabled → CWE-693) with the mapping noted in evidence. |
+| **OWASP ASVS** | ASVS section id (e.g., `V2.1`, `V4.2`) | Semgrep ASVS rules tag directly. Posture signals need manual section assignment with evidence annotation. |
+| **CVE / SCA** | package name (one group per package, ordered by highest-severity CVE) | Within each package group, list CVEs in CRITICAL → HIGH → MEDIUM → LOW order. |
+| **IaC misconfig** | resource type (e.g., `terraform.aws.s3_bucket`, `kubernetes.Deployment`, `dockerfile`) | One group per resource type. |
+| **Bring-your-own** | Slug of each checklist item (e.g., `verify-csp-set`, `verify-waf-enabled`) | Each checklist item becomes a group. Items with no matching signal are flagged manual-review. |
+
+The report's executive summary always shows counts by severity regardless of framework, so "what should I fix first" is never lost. If the user captured a focused scope in the argument-hint (e.g., "only CSP and WAF"), drop out-of-scope signals before grouping; the framework's grouping still applies to what remains.
 
 ## OWASP Top 10 → security area mapping
 
