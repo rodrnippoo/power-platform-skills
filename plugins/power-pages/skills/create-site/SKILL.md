@@ -318,11 +318,11 @@ The script prints `{"status":"ok","output":"<path>"}` on success. Capture and us
 
 ### 4.4 Open the Plan in the Default Browser
 
-Use the platform-appropriate command via `Bash`:
+Use the platform-appropriate command for the current shell:
 
-- macOS: `open "<OUTPUT_PATH>"`
-- Windows (PowerShell): `Start-Process "<OUTPUT_PATH>"`
-- Linux: `xdg-open "<OUTPUT_PATH>"`
+- macOS (`Bash`): `open "<OUTPUT_PATH>"`
+- Linux (`Bash`): `xdg-open "<OUTPUT_PATH>"`
+- Windows (`PowerShell`): `Start-Process "<OUTPUT_PATH>"`
 
 ### 4.5 Present a Brief Summary in the Terminal
 

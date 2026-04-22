@@ -292,10 +292,10 @@ export class HomeComponent implements AfterViewInit, OnDestroy {
     }
 
     const showStatus = (index: number) => {
-      if (liveOverride) return
-      renderStatusMessage(statuses[index % statuses.length].text)
       const phaseIndex = Math.min(Math.floor((index / statuses.length) * phaseLabels.length), phaseLabels.length - 1)
       updatePhaseLabel(phaseLabels[phaseIndex])
+      if (liveOverride) return
+      renderStatusMessage(statuses[index % statuses.length].text)
     }
 
     const advanceStatus = () => {
@@ -313,7 +313,7 @@ export class HomeComponent implements AfterViewInit, OnDestroy {
       const banner = document.getElementById('inputBanner') as HTMLElement | null
       const promptEl = document.getElementById('inputBannerPrompt')
       try {
-        const res = await fetch('/scaffold-status.json', { cache: 'no-store' })
+        const res = await fetch('/scaffold-status.json?t=' + Date.now(), { cache: 'no-store' })
         if (!res.ok) throw new Error('no status')
         const data = await res.json() as { message?: string; awaitingInput?: boolean; inputPrompt?: string }
         if (data.message) {

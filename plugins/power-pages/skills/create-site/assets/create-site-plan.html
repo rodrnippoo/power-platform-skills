@@ -159,7 +159,8 @@ h3{font-size:15px;font-weight:700;color:var(--text-bright);margin-top:24px;margi
       <h2>Overview</h2>
       <p class="section-desc">Implementation plan for <code>__SITE_NAME__</code></p>
 
-      <div class="summary-box">__SUMMARY__</div>
+      <div class="summary-box" id="summaryBox"></div>
+      <script id="summaryRaw" type="text/plain">__SUMMARY__</script>
 
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-num" id="statPages">0</div><div class="stat-label">Pages</div></div>
@@ -254,6 +255,9 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
   });
 });
+
+// --- Summary (read from text/plain rawtext so &, <, > are safe) ---
+document.getElementById('summaryBox').textContent = document.getElementById('summaryRaw').textContent;
 
 // --- Overview stats ---
 document.getElementById('statPages').textContent = PAGES.length;
