@@ -84,7 +84,7 @@ Use `AskUserQuestion` to ask which framework to assess against. The supported op
 | Framework | What it covers |
 |---|---|
 | CWE / CWE Top 25 (SAST) | Source-code weaknesses tagged with CWE IDs; the CWE Top 25 list specifically flags the most critical classes. |
-| OWASP Top 10 (SAST aspect) | Source-code findings tagged with OWASP Top 10 (2021) categories. For the DAST aspect — runtime vulnerabilities — delegate to `/security-scan`. |
+| OWASP Top 10 (SAST aspect) | Source-code findings tagged with OWASP Top 10 categories. For the DAST aspect — runtime vulnerabilities — delegate to `/security-scan`. |
 | OWASP ASVS | Findings tagged against OWASP Application Security Verification Standard control sections. |
 | CVE / dependency vulnerabilities (SCA) | Vulnerabilities in third-party dependencies, tagged by CVE ID and severity. |
 | IaC misconfiguration | Misconfigurations in infrastructure-as-code (Terraform, CloudFormation, Kubernetes, Helm, Dockerfile). |

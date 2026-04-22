@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Power Pages security review</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #1a1a1a;
+      --fg-muted: #555;
+      --bg: #fafafa;
+      --card-bg: #ffffff;
+      --border: #e3e3e3;
+      --sev-critical-bg: #d63e2f;
+      --sev-critical-fg: #ffffff;
+      --sev-high-bg: #e67e22;
+      --sev-high-fg: #ffffff;
+      --sev-medium-bg: #f1c40f;
+      --sev-medium-fg: #1a1a1a;
+      --sev-passing-bg: #27ae60;
+      --sev-passing-fg: #ffffff;
+      --accent: #2563eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #e6e6e6;
+        --fg-muted: #a0a0a0;
+        --bg: #1a1a1a;
+        --card-bg: #242424;
+        --border: #333;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+      margin: 0;
+      line-height: 1.5;
+    }
+    .page { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    header.top { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+    header.top h1 { margin: 0 0 0.5rem; font-size: 1.75rem; }
+    header.top p { margin: 0; color: var(--fg-muted); }
+    dl.metadata {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 0.25rem 1rem;
+      margin: 1rem 0 0;
+      padding: 0;
+    }
+    dl.metadata dt { font-weight: 600; color: var(--fg-muted); }
+    dl.metadata dd { margin: 0; }
+    code { background: var(--card-bg); padding: 0.1rem 0.3rem; border-radius: 3px; border: 1px solid var(--border); font-size: 0.9em; }
+    .summary {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .summary-total { font-size: 1.1rem; margin-bottom: 1rem; }
+    .summary-block { margin-top: 1rem; }
+    .summary-block h3 { margin: 0 0 0.5rem; font-size: 1rem; color: var(--fg-muted); }
+    ul.severity-list, ul.category-list, ul.permissions-summary {
+      list-style: none; padding: 0; margin: 0;
+      display: flex; flex-wrap: wrap; gap: 0.5rem;
+    }
+    ul.severity-list li, ul.category-list li, ul.permissions-summary li {
+      display: inline-flex; align-items: baseline; gap: 0.35rem;
+      padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: 999px;
+      background: var(--bg); font-size: 0.9rem;
+    }
+    .count { font-weight: 700; font-size: 1rem; }
+    .sev-critical .count, li.sev-critical .count { color: var(--sev-critical-bg); }
+    .sev-high .count, li.sev-high .count { color: var(--sev-high-bg); }
+    .sev-medium .count, li.sev-medium .count { color: var(--sev-medium-bg); }
+    .sev-passing .count, li.sev-passing .count { color: var(--sev-passing-bg); }
+    aside.pending-scans {
+      background: #fff8e1;
+      border: 1px solid #f1c40f;
+      color: #4a3b00;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 2rem;
+    }
+    @media (prefers-color-scheme: dark) {
+      aside.pending-scans { background: #3a2e00; color: #ffeaa0; border-color: #b89400; }
+    }
+    aside.pending-scans h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+    aside.pending-scans ul { margin: 0.5rem 0 0; padding-left: 1.25rem; }
+    section.category {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    section.category > h3 { margin-top: 0; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+    article.finding {
+      border-left: 4px solid var(--border);
+      padding: 0.75rem 1rem;
+      margin: 0.75rem 0;
+      background: var(--bg);
+      border-radius: 0 4px 4px 0;
+    }
+    article.finding.sev-critical { border-left-color: var(--sev-critical-bg); }
+    article.finding.sev-high { border-left-color: var(--sev-high-bg); }
+    article.finding.sev-medium { border-left-color: var(--sev-medium-bg); }
+    article.finding.sev-passing { border-left-color: var(--sev-passing-bg); }
+    article.finding header {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    article.finding header h4 { margin: 0; flex: 1 1 auto; font-size: 1.05rem; }
+    .severity-badge {
+      display: inline-block; padding: 0.15rem 0.55rem; border-radius: 4px;
+      font-size: 0.75rem; font-weight: 700; letter-spacing: 0.5px;
+    }
+    .severity-badge.sev-critical { background: var(--sev-critical-bg); color: var(--sev-critical-fg); }
+    .severity-badge.sev-high { background: var(--sev-high-bg); color: var(--sev-high-fg); }
+    .severity-badge.sev-medium { background: var(--sev-medium-bg); color: var(--sev-medium-fg); }
+    .severity-badge.sev-passing { background: var(--sev-passing-bg); color: var(--sev-passing-fg); }
+    .status {
+      display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px;
+      font-size: 0.8rem; border: 1px solid var(--border); color: var(--fg-muted);
+    }
+    .status-fixed { background: #d4edda; border-color: #c3e6cb; color: #155724; }
+    .status-skipped { background: #f5f5f5; border-color: #ccc; color: #777; text-decoration: line-through; }
+    .status-deferred { background: #fff3cd; border-color: #ffeeba; color: #856404; }
+    .source, .evidence, .remediation, .before-after { margin-top: 0.35rem; font-size: 0.95rem; color: var(--fg); }
+    .source em { color: var(--fg-muted); font-style: normal; font-weight: 600; }
+    .delegate code { background: transparent; border: none; padding: 0; color: var(--accent); }
+    .before-after { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem; }
+    section.permissions-audit {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    section.permissions-audit h3 { margin-top: 0; }
+    section.permissions-audit .note { color: var(--fg-muted); font-size: 0.9rem; margin-top: 0.5rem; }
+    a { color: var(--accent); }
+    p.empty { color: var(--fg-muted); font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="top">
+      <h1>Power Pages security review</h1>
+      <p>Framework-driven review of the site's current security posture, aggregated from every security-related sub-skill and from the existing table-permissions audit. Findings are grouped by category; remediations delegate to the skill that owns the concern.</p>
+      __METADATA__
+    </header>
+
+    __SUMMARY__
+
+    __PENDING_SCANS__
+
+    <h2>Findings by category</h2>
+    __CATEGORIES__
+
+    __PERMISSIONS_AUDIT__
+  </div>
+</body>
+</html>

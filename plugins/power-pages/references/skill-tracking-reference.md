@@ -45,6 +45,7 @@ If the tracking script creates or updates site setting YAML files, include those
 | security-scan | SecurityScan | Site/AI/Skills/SecurityScan |
 | security-headers | SecurityHeaders | Site/AI/Skills/SecurityHeaders |
 | code-analysis | CodeAnalysis | Site/AI/Skills/CodeAnalysis |
+| security | Security | Site/AI/Skills/Security |
 
 ## YAML Format
 
