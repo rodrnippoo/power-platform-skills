@@ -177,7 +177,7 @@ function runScan({
   }
 
   if (!codeqlAvailable()) {
-    const err = new Error('codeql CLI not on PATH — run check-codeql.js for install guidance');
+    const err = new Error('codeql CLI not on PATH — run check-tools.js for install guidance');
     err.code = 'NOT_FOUND';
     throw err;
   }

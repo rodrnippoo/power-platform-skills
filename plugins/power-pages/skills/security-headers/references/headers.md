@@ -29,7 +29,7 @@ In code sites, each site-setting is a separate YAML file under `.powerpages-site
 
 ## Recognized header catalogue
 
-The Power Pages runtime reads these `HTTP/*` site-settings and emits the corresponding response header. Settings not on this list are written to the store but silently ignored at runtime — the audit command flags them as `custom` so typos are visible.
+The Power Pages runtime reads these `HTTP/*` site-settings and emits the corresponding response header. Names outside this catalogue are also emitted by the runtime as-is; the audit command flags them as `custom` so the author can spot typos or confirm the non-standard name was intentional.
 
 **CSP**
 - `HTTP/Content-Security-Policy`
@@ -69,18 +69,11 @@ The Power Pages runtime reads these `HTTP/*` site-settings and emits the corresp
 
 ## Power Pages-managed headers (not settable)
 
-These headers are emitted by the runtime and cannot be overridden via site settings:
-
-- **`Strict-Transport-Security`** — emitted unconditionally on every HTTPS response with a long `max-age`, `includeSubDomains`, and `preload`. Writing `HTTP/Strict-Transport-Security` is explicitly rejected by the `security-headers.js` script with exit code `3`.
-- **`Cache-Control`** — Power Pages-managed; anonymous static files receive `public` with the Power Pages default max-age.
-
-If the user asks to configure HSTS (`Strict-Transport-Security`), tell them the runtime handles it and no maker action is required. If they ask to weaken or disable HSTS, there is no path — the runtime emits it unconditionally on HTTPS.
+`Strict-Transport-Security` and `Cache-Control` are emitted by the runtime and cannot be overridden. Writing `HTTP/Strict-Transport-Security` is rejected by `security-headers.js` with exit code `3`.
 
 ## Default behavior when a setting is absent
 
-When an `HTTP/<Header>` site-setting is absent, the runtime omits that header entirely on the response. There is no implicit default for most headers.
-
-**The one exception is CSP.** Some sites have a default CSP applied automatically when `HTTP/Content-Security-Policy` is absent, depending on how the site was provisioned — an audit may therefore show the site emitting a CSP even when there is no site-setting YAML on disk. Do not rely on that implicit default — explicitly configure `HTTP/Content-Security-Policy` so the policy is reviewable in source control and the behavior is consistent regardless of provisioning history.
+When an `HTTP/<Header>` site-setting is absent, the runtime omits that header. The one exception is CSP: some sites have a default CSP applied when `HTTP/Content-Security-Policy` is absent, so an audit may show a CSP even with no site-setting YAML on disk. Explicitly configure `HTTP/Content-Security-Policy` so the policy is reviewable in source control.
 
 ## CSP specifics
 
@@ -120,8 +113,6 @@ CORS headers are applied to every response, not only Web API responses — a mis
 **`HTTP/SameSite/<cookie-name>`** — per-cookie override. Use when the global default is too restrictive for a specific cookie (e.g., the site is hosted in an iframe on a third-party domain and needs `None` for its session cookie).
 
 **`None` requires `Secure`.** Browsers reject a `SameSite=None` cookie without the `Secure` attribute. The runtime sets `Secure` on every cookie when the site is served over HTTPS, so `None` works in practice for HTTPS sites.
-
-**Browser-compatibility handling.** The runtime detects user agents that mishandle `SameSite=None` (older iOS, older macOS Safari, older Chrome) and serves them a compatible cookie without the `None` attribute so the session still works. You do not need to configure this — it is automatic.
 
 For iframe-embedding scenarios (hosting a Power Pages site inside a third-party page), use `HTTP/SameSite/<session-cookie-name>: None` on the specific cookies the embed needs so they survive cross-site contexts.
 
@@ -164,9 +155,9 @@ Run `scan-external-urls.js` to tighten the `https:` wildcards into specific host
 
 ## Deployment and caching
 
-Header changes land in Dataverse via `/deploy-site`. The site-setting update then triggers a soft restart of the site (no downtime), and the new header values take effect once the restart has propagated — there may be a brief delay before they are visible. This is much faster than WAF rule changes (which can take up to an hour at the edge) but it is not instantaneous. Verify after a short wait in an incognito browser tab or via `curl -I <site-url>`.
+Header changes land in Dataverse via `/deploy-site`. The site-setting update triggers a soft restart (no downtime); new values take effect once the restart propagates. Verify after a short wait in an incognito browser tab or via `curl -I <site-url>`.
 
-**Maker-mode requests skip all HTTP/* header emission.** Requests from Power Pages Studio or other detected maker tools bypass the header middleware so maker functionality isn't broken by a restrictive policy. Consequence: viewing the site through maker tools will NOT show your headers. Always verify with a fresh browser tab that isn't authenticated as a maker.
+**Maker-mode requests skip all HTTP/* header emission.** Requests from Power Pages Studio or other detected maker tools bypass the header middleware. Consequence: viewing the site through maker tools will NOT show your headers. Always verify with a fresh browser tab that isn't authenticated as a maker.
 
 ## Command spec — `security-headers.js`
 
@@ -218,16 +209,15 @@ Write (delete). Removing a setting that does not exist is a no-op (exit 0 with `
 
 ## Command spec — `scan-external-urls.js`
 
-Scan the project for external URLs referenced in HTML, CSS, and JavaScript. Produces a structured allowlist keyed by CSP directive plus the Power-Pages-runtime dependencies.
+Scan the project for external URLs referenced in HTML, CSS, and JavaScript. Produces a structured allowlist keyed by CSP directive plus the cloud-agnostic Power-Pages-runtime dependencies. The cloud-specific `content.powerapps.*` host is intentionally omitted — compose it separately after detecting the site's cloud via `pac auth who` (see [Power-Pages-runtime sources a CSP must allow](#power-pages-runtime-sources-a-csp-must-allow)).
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/security-headers/scripts/scan-external-urls.js" \
   --projectRoot "<project-root>" \
-  [--include-patterns "<comma-separated globs>"] \
-  [--exclude-patterns "<comma-separated globs>"]
+  [--exclude "<comma-separated directory names>"]
 ```
 
-Read-only. Walks the project tree (excluding `node_modules`, `.git`, `.powerpages-site/scaffolding-caches` and similar build directories by default). Returns JSON:
+Read-only. Walks the project tree (excluding `node_modules`, `.git`, `.powerpages-site`, and similar build directories by default). `--exclude` adds extra directory names (at any depth) to skip on top of the defaults. Returns JSON:
 
 ```json
 {
@@ -240,8 +230,12 @@ Read-only. Walks the project tree (excluding `node_modules`, `.git`, `.powerpage
     "frame-src": ["<hosts>"]
   },
   "runtimeDependencies": {
-    "script-src": ["content.powerapps.com", "..."],
-    "style-src": ["'unsafe-inline'", "https:"]
+    "script-src": ["'self'", "'nonce'"],
+    "style-src": ["'self'", "'unsafe-inline'", "https:"],
+    "img-src": ["'self'", "data:", "https:"],
+    "font-src": ["'self'", "https:", "data:"],
+    "connect-src": ["'self'", "https:"],
+    "frame-ancestors": ["'self'"]
   },
   "bySourceFile": [
     { "file": "src/components/widget.tsx", "urls": ["https://..."] }

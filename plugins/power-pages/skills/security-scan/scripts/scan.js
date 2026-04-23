@@ -3,27 +3,20 @@
 // scan.js — Power Pages security scan commands.
 //
 // Five modes:
-//   --quick [--lcid N]                Quick synchronous diagnostic scan
+//   --quick --lcid N                  Quick synchronous diagnostic scan
 //   --deep                            Start async OWASP deep scan (anonymous)
 //   --ongoing                         Is a deep scan currently running?
 //   --report                          Fetch latest completed deep-scan report
 //   --score                           Fetch latest deep-scan score (totalRules / succeededRules)
 //
-// Scope note: the underlying service supports authenticated-page scans (where
-// the scanner signs in as a user to test auth-gated pages), but this script
-// does NOT accept credentials as CLI arguments. Passing secrets via argv leaks
-// them to shell history, process lists, and any tool that captures argv.
-// Authenticated-page coverage is available through the Power Pages Studio
-// interface, which collects credentials via a UI form.
-//
-// Notable shape differences vs waf.js:
-//   - Deep-start 202 has no Operation-Location / Retry-After headers; response
-//     is a plain { "accepted": true } signal. Callers poll --ongoing to observe
+// Notable behaviors:
+//   - Deep-start is accepted asynchronously (HTTP 202) without a service-side
+//     poll URL or Retry-After header; callers poll --ongoing to observe
 //     completion (the scan runs for a substantial period server-side).
-//   - Z003 (scan already ongoing) surfaces as 204 No Content on start, report,
-//     and score. Distinct exit code 4 so skills can branch.
-//   - No A037 / A039 / D005 / B-series codes; scan operations don't use those.
-//     Trial / developer / non-production state refusals come through as A010.
+//   - Z003 (scan already ongoing) surfaces as HTTP 204 No Content on deep-start,
+//     report, and score. Distinct exit code 4 so skills can branch.
+//   - A010 (invalid input) can surface on --quick (missing/bad LCID, malformed
+//     portal id) or --deep (malformed portal id); distinct exit code 5.
 //
 // CLI usage:
 //   node scan.js --<mode> --portalId <guid> [mode flags] [--dry-run]
@@ -39,13 +32,16 @@ const EXIT = Object.freeze({
   INVALID_ARGS: 2,    // bad or missing CLI flags
   NOT_FOUND: 3,       // A001
   ALREADY_ONGOING: 4, // Z003 — applies to start, report, score
-  INVALID_STATE: 5,   // A010 — bad input, or site state refusal (trial / dev / non-prod)
+  INVALID_STATE: 5,   // A010 — invalid input (bad LCID, malformed portal id, etc.)
+  CALLER_CONFIG: 6,   // A019 / A033 — caller-config issue (portal id not a GUID, or tenant mismatch).
 });
 
 const CATALOGUED_EXIT = Object.freeze({
   A001: EXIT.NOT_FOUND,
   Z003: EXIT.ALREADY_ONGOING,
   A010: EXIT.INVALID_STATE,
+  A019: EXIT.CALLER_CONFIG,
+  A033: EXIT.CALLER_CONFIG,
 });
 
 // Default caller-side wait before the first --ongoing poll after a successful
@@ -59,16 +55,18 @@ const HELP = `Usage:
   scan.js --help
 
 Modes:
-  --quick [--lcid <int>]                   Synchronous diagnostic scan.
-                                           Returns an array of pass/warn/error
-                                           items immediately.
+  --quick --lcid <int>                     Synchronous diagnostic scan.
+                                           LCID (Microsoft Locale ID) is
+                                           REQUIRED and controls the language
+                                           of the diagnostic messages (e.g.
+                                           1033 for en-US). Returns an array
+                                           of pass/warn/error items
+                                           immediately.
   --deep                                   Start async OWASP-based deep scan
                                            against the site's public surface
-                                           (anonymous). 202 accept is immediate;
+                                           (anonymous). Accepted asynchronously;
                                            scan runs server-side for an
-                                           extended period. Authenticated-page
-                                           coverage is NOT available here; use
-                                           the Power Pages Studio interface.
+                                           extended period.
   --ongoing                                Boolean: is a deep scan running?
   --report                                 Fetch latest completed deep-scan
                                            report as structured JSON.
@@ -103,9 +101,16 @@ Output:
           poll URL for deep-scan start — poll via the poll_command instead.
           When a scan is already running, --deep returns:
           { "accepted": false, "alreadyOngoing": true, <same async fields> }
-          --quick returns an array of pass/warn/error items. --ongoing
-          returns a boolean. --report and --score return the structured
-          report / score objects from the service.
+          --quick returns an array of items shaped as:
+            { "issue": "<title>",
+              "category": "<category>",
+              "result": "Pass|Error|Warning|Information",
+              "description": "<detail>",
+              "learnMoreUrl": "<doc URL>" }
+          --ongoing returns a JSON boolean (true / false). --report
+          returns the structured report object (see
+          references/commands.md). --score returns
+          { "totalRules": <int>, "succeededRules": <int> }.
   stderr  Diagnostics, transient-retry notices, and catalogued service
           error codes (A001 / A010 / Z003) when applicable.
 
@@ -116,8 +121,11 @@ Exit codes:
   2  Invalid or missing CLI arguments.
   3  Portal not found (A001).
   4  A scan is already ongoing on this site (Z003). Poll --ongoing and retry.
-  5  Invalid input or site state (A010). Includes bad arguments AND trial /
-     developer / non-production sites that cannot be scanned.
+  5  Invalid input (A010). Typical causes: missing or bad LCID on --quick,
+     malformed portal id. Read stderr for the specific cause.
+  6  Caller-config issue (A019 / A033). Portal id is not a GUID, or the
+     caller's tenant does not match the portal's tenant. Distinct from
+     exit 1 so callers can branch on caller-config vs transport failures.
 `;
 
 function extractErrorCode(body) {
@@ -173,19 +181,23 @@ function throwWithCode(operation, res) {
 // ===== Public API functions =====
 
 /**
- * Quick synchronous diagnostic scan. Returns an array of diagnostic items.
- * LCID, when supplied, controls the language of the diagnostic messages.
- * Omit to use the service's default.
+ * Quick synchronous diagnostic scan. Returns an array of diagnostic items
+ * shaped as { issue, category, result, description, learnMoreUrl }.
+ * LCID (Microsoft Locale ID, e.g. 1033 for en-US) is REQUIRED and controls
+ * the language of the diagnostic messages.
  */
 async function runQuickScan({ portalId, lcid, environmentId, cloud, deps } = {}) {
   requirePortalId(portalId);
+  if (lcid === undefined || lcid === null || lcid === '') {
+    throw invalidArgs('--lcid is required for --quick');
+  }
   const res = await callAdminApi({
     method: 'POST',
     operation: 'scan/quick/execute',
     portalId,
     environmentId,
     cloud,
-    extraQuery: lcid ? { lcid: String(lcid) } : undefined,
+    extraQuery: { lcid: String(lcid) },
     deps,
   });
   throwWithCode('runQuickScan', res);
@@ -211,11 +223,6 @@ async function runQuickScan({ portalId, lcid, environmentId, cloud, deps } = {})
  *                               progress
  *   - alreadyOngoing          — present and true only when a scan was already
  *                               running when start was attempted
- *
- * This function does not accept credentials — authenticated-page scanning
- * is intentionally out of scope here; use the Power Pages Studio interface
- * for that, where credentials are collected via a UI form rather than an
- * argv value that leaks to shell history / process lists.
  */
 async function startDeepScan({ portalId, environmentId, cloud, deps } = {}) {
   requirePortalId(portalId);
@@ -225,6 +232,10 @@ async function startDeepScan({ portalId, environmentId, cloud, deps } = {}) {
     retry_after_seconds: DEEP_SCAN_DEFAULT_RETRY_AFTER_SECONDS,
     poll_command: pollCommand,
   };
+  // Body is intentionally omitted. The service accepts an optional
+  // { username, password } pair for authenticated scans; this script scopes
+  // itself to anonymous public-surface scans only — authenticated-page
+  // coverage belongs in Power Pages Studio, not here (argv would leak secrets).
   const res = await callAdminApi({
     method: 'POST',
     operation: 'scan/deep/start',
@@ -423,7 +434,11 @@ async function main() {
       err.code === 'INVALID_ARGS'
         ? EXIT.INVALID_ARGS
         : CATALOGUED_EXIT[err.code] ?? EXIT.UNKNOWN;
-    exitWithMessage(exitCode, err.stack || err.message);
+    // Surface a single-line actionable message to the user. The stack is only
+    // useful for debugging — gate it behind DEBUG so it does not leak Node
+    // internals into normal CLI output.
+    const message = process.env.DEBUG ? (err.stack || err.message) : err.message;
+    exitWithMessage(exitCode, message);
   }
 }
 

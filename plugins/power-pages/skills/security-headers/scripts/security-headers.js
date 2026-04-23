@@ -40,8 +40,8 @@ const EXIT = Object.freeze({
 
 // Full catalogue of HTTP/* site-setting names the Power Pages runtime
 // recognizes and emits as response headers. Settings outside this list are
-// accepted on disk but silently ignored at runtime — the audit flags them
-// so typos are visible.
+// also emitted as-is by the runtime; the audit flags them as `custom` so
+// the author can spot typos or confirm the non-standard name was intentional.
 const RECOGNIZED_HTTP_HEADER_NAMES = Object.freeze([
   // CSP
   'HTTP/Content-Security-Policy',

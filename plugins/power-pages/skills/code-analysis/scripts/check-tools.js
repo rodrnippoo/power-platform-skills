@@ -8,8 +8,7 @@
 // Supported tools and what they cover:
 //   semgrep  — SAST against CWE / OWASP Top 10 / OWASP ASVS rulesets
 //   codeql   — SAST (deep JS/TS dataflow analysis; CWE-tagged rules)
-//   trivy    — SCA (CVE-tagged dependency scan) + IaC misconfig
-//   checkov  — IaC misconfig (Terraform / CloudFormation / K8s / Helm)
+//   trivy    — SCA (CVE-tagged dependency scan) + dependency license audit
 //
 // CLI usage:
 //   node check-tools.js
@@ -55,22 +54,13 @@ const TOOLS = Object.freeze({
     install:
       'Install via a system package manager (`brew install trivy`, `apt install trivy`, ' +
       '`scoop install trivy`) or download the prebuilt binary from the official Trivy releases.',
-    covers: 'SCA (CVE-tagged dependency scan), IaC misconfig, secret scanning',
-  },
-  checkov: {
-    command: 'checkov',
-    versionArgs: ['--version'],
-    versionPattern: /(\d+\.\d+\.\d+)/,
-    install:
-      'Install via pip (`pip install checkov`) or pipx (`pipx install checkov`). ' +
-      'Checkov is a Python package.',
-    covers: 'IaC misconfig — Terraform, CloudFormation, Kubernetes, Helm, Dockerfile',
+    covers: 'SCA (CVE-tagged dependency scan), dependency license audit, secret scanning',
   },
 });
 
 const HELP = `Usage:
   check-tools.js
-  check-tools.js --tool <semgrep|codeql|trivy|checkov>
+  check-tools.js --tool <semgrep|codeql|trivy>
   check-tools.js --help
 
 Detects which of the code-analysis skill's supported CLI tools are on PATH.

@@ -15,7 +15,7 @@
 // template file.
 //
 // CLI usage:
-//   node render-report.js --findings <path> --output <path>
+//   node render-report.js --findings <path> --output <path> [--dry-run]
 //   node render-report.js --help
 
 const fs = require('node:fs');
@@ -31,7 +31,7 @@ const EXIT = Object.freeze({
 const TEMPLATE_PATH = path.join(__dirname, '..', 'assets', 'report-template.html');
 
 const HELP = `Usage:
-  render-report.js --findings <path> --output <path>
+  render-report.js --findings <path> --output <path> [--dry-run]
   render-report.js --help
 
 Renders the unified security-review HTML report from a findings JSON file
@@ -41,6 +41,10 @@ Options:
   --findings <path>  Path to the findings JSON (REQUIRED). See the schema
                      in references/orchestration.md.
   --output <path>    Where to write the HTML report (REQUIRED).
+  --dry-run          Validate inputs and compute the rendered byte count,
+                     but do NOT write the output file. Prints a JSON
+                     summary ({ dryRun, wouldWrite, bytes, severityCounts })
+                     to stdout.
   -h, --help         Show this help.
 
 Exit codes:
@@ -173,10 +177,38 @@ function renderCategories(findings) {
   }).join('\n');
 }
 
+// Detect whether the review is running under the OWASP Top 10 framework.
+// When true, audit-permissions findings fold into A01 upstream and this
+// function returns an empty-state card (the standalone Table Permissions
+// tab is superseded by the inline A01 rendering). For every other
+// framework (CWE, ASVS, SCA, license, bring-your-own) the standalone
+// section renders because audit-permissions findings do not map cleanly
+// into those frameworks' categories.
+function isOwaspFramework(findings) {
+  const fw = findings.metadata?.framework;
+  if (!fw || typeof fw !== 'string') return false;
+  return /owasp\s*top\s*10/i.test(fw);
+}
+
 function renderPermissionsAudit(findings) {
   const pa = findings.permissionsAudit;
   if (!pa) {
     return '<div class="empty-state">The table-permissions audit was not included in this review.</div>';
+  }
+  // OWASP Top 10: the meta-skill merges pa.findings[] into categories[id=A01]
+  // upstream, so the standalone Table Permissions section is redundant.
+  // Point the reader at A01 and the full-evidence deep-link.
+  if (isOwaspFramework(findings)) {
+    const reportPath = pa.reportPath || 'docs/permissions-audit.html';
+    return `
+      <div class="permissions-link">
+        Table-permission findings are folded into <strong>A01 Broken Access Control</strong> on the Findings tab
+        so they render inline with every other A01 finding under the unified severity scheme.
+        Full evidence and the original severity-grouped report remain at
+        <a href="${escapeHtml(reportPath)}"><code>${escapeHtml(reportPath)}</code></a>;
+        fixes still route to the <code>table-permissions-architect</code> agent via <code>/audit-permissions</code>.
+      </div>
+    `.trim();
   }
   const s = pa.summary || {};
   const reportPath = pa.reportPath || 'docs/permissions-audit.html';
@@ -191,9 +223,9 @@ function renderPermissionsAudit(findings) {
   const passing = s.pass ?? 0;
   return `
     <div class="permissions-link">
-      Full evidence and the original severity-grouped report remain at
-      <a href="${escapeHtml(reportPath)}"><code>${escapeHtml(reportPath)}</code></a>.
-      This section shows those findings re-labeled under the unified Critical / High / Medium / Passing scheme;
+      Full evidence: <a href="${escapeHtml(reportPath)}"><code>${escapeHtml(reportPath)}</code></a>.
+      Audit-permissions findings do not map cleanly into this framework's categories,
+      so they render here under the unified Critical / High / Medium / Passing scheme;
       fixes still route to the <code>table-permissions-architect</code> agent via <code>/audit-permissions</code>.
     </div>
     <div class="stats-grid">
@@ -246,7 +278,7 @@ function siteNameFromFindings(findings) {
   return findings.metadata?.siteName || 'Power Pages site';
 }
 
-function render({ findingsPath, outputPath } = {}) {
+function render({ findingsPath, outputPath, dryRun = false } = {}) {
   if (!findingsPath || typeof findingsPath !== 'string') {
     throw invalidArgs('--findings is required');
   }
@@ -293,16 +325,25 @@ function render({ findingsPath, outputPath } = {}) {
     html = html.split(token).join(value);
   }
 
+  const bytes = Buffer.byteLength(html, 'utf8');
+
+  if (dryRun) {
+    // Destructive-writes rule (§5.7): dry-run validates inputs and reports
+    // what WOULD be written without touching the filesystem.
+    return { dryRun: true, wouldWrite: outputPath, bytes, severityCounts };
+  }
+
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, html, 'utf8');
 
-  return { outputPath, bytes: Buffer.byteLength(html, 'utf8') };
+  return { outputPath, bytes };
 }
 
 function parseCli(argv) {
   const options = {
     findings: { type: 'string' },
     output: { type: 'string' },
+    'dry-run': { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
   };
   return parseArgs({ args: argv.slice(2), options, strict: true }).values;
@@ -321,7 +362,11 @@ function main() {
     return;
   }
   try {
-    const result = render({ findingsPath: args.findings, outputPath: args.output });
+    const result = render({
+      findingsPath: args.findings,
+      outputPath: args.output,
+      dryRun: Boolean(args['dry-run']),
+    });
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } catch (err) {
     const exitCode = err.code === 'INVALID_ARGS' ? EXIT.INVALID_ARGS : EXIT.UNKNOWN;
@@ -344,6 +389,7 @@ module.exports = {
   renderMetadata,
   countBySeverity,
   siteNameFromFindings,
+  isOwaspFramework,
   TEMPLATE_PATH,
   EXIT,
 };

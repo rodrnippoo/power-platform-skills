@@ -73,11 +73,16 @@ function parseJsonBody(body) {
  * @param {object} [options.extraQuery]        Extra query-string parameters
  * @param {string} [options.apiVersion]        Override the default api-version
  * @param {number} [options.timeout=15000]     Per-request timeout
+ * @param {boolean} [options.includeHeaders]   When true, response headers are
+ *                                             returned on the `headers` field.
  * @param {object} [options.deps]              Dependency overrides for testing
  *
- * @returns {Promise<{ statusCode: number, body: any, error?: string }>}
+ * @returns {Promise<{ statusCode: number, body: any, headers?: object, error?: string }>}
  *   Long-running operations return `{ statusCode: 202, body: null }`;
  *   the caller is responsible for re-checking via the appropriate GET endpoint.
+ *   When `options.includeHeaders` is true, response headers are returned on the
+ *   `headers` field — useful for async operations that expose a polling URL
+ *   and a recommended poll interval via response headers.
  */
 async function callAdminApi(options) {
   const deps = {
@@ -136,6 +141,7 @@ async function callAdminApi(options) {
       method: options.method,
       headers: buildHeaders(),
       body: bodyStr,
+      includeHeaders: options.includeHeaders === true,
       timeout: options.timeout ?? 15000,
     });
 
@@ -164,10 +170,14 @@ async function callAdminApi(options) {
     break;
   }
 
-  return {
+  const result = {
     statusCode: response.statusCode,
     body: parseJsonBody(response.body),
   };
+  if (options.includeHeaders === true && response.headers) {
+    result.headers = response.headers;
+  }
+  return result;
 }
 
 module.exports = {

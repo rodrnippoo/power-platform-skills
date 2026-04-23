@@ -9,11 +9,8 @@ description: >-
   OWASP scan, ZAP scan, scanning for vulnerabilities, checking the
   security score, reviewing the last scan report, or wants to see what
   findings the site has — even if they do not use the exact phrase
-  "security scan". Out of scope: authenticated-page scanning (use the
-  Power Pages Studio interface for credential handling), scheduled
-  scans, cancelling a running scan (cancel from Studio), WAF log
-  analysis (see `/web-application-firewall`), and static code analysis
-  (see `/code-analysis`).
+  "security scan". Out of scope: authenticated-page scanning (use
+  Studio).
 user-invocable: true
 argument-hint: "[optional: quick, deep, report, score]"
 allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
@@ -31,8 +28,6 @@ Run a security scan against a Power Pages site and fetch the results. Four user 
 - **Fetch the latest deep-scan report** — structured findings with per-rule status and vulnerability details.
 - **Fetch the security score** — raw `{ totalRules, succeededRules }` pair from the latest deep scan; the skill computes a readable percentage for the user.
 
-Authenticated-page scanning (where the scanner signs in as a user to test auth-gated pages) is NOT exposed by this skill — it is available through the Power Pages Studio interface under Security, where credentials are collected via a form. Cancelling a running deep scan is also a Studio-only operation.
-
 ## When to load which reference
 
 - `references/commands.md` — when building `--quick`, `--deep`, `--ongoing`, `--report`, or `--score` command lines; when interpreting exit codes on stderr.
@@ -46,12 +41,12 @@ Authenticated-page scanning (where the scanner signs in as a user to test auth-g
 - **Deep scans are long-running.** The skill does NOT wait — start the scan, tell the user to expect a substantial wait server-side, and let them come back later to fetch the report. The completion signal is an email to the site admin plus a visible result in the Power Pages Studio interface under Security → Run scan.
 - **Only one deep scan per site at a time.** `Z003` surfaces distinctly (exit code 4) when a start is attempted against a site that already has a scan running, or when a report/score is requested while a scan is mid-flight. Poll `--ongoing` until it settles; do not retry immediately.
 - **Quick scan is not the same thing as deep scan.** Quick runs a synchronous set of built-in diagnostic checks against site configuration and common patterns. Deep runs an asynchronous OWASP-based dynamic scan that actively probes the public surface. Users often ask for "a scan" when they mean one specific type — ask them to pick.
-- **Anonymous scanning only.** Deep scans run against the public surface only — the scanner does not sign in as a user. Authenticated-page coverage is available through the Power Pages Studio interface, where credentials are collected via a UI form.
+- **Deep scan is anonymous only.** The scanner does not sign in; authenticated-page coverage is available through Studio.
 - **Security score is raw, not a grade.** The underlying value is `{ totalRules, succeededRules }` from the most recent completed deep scan. The skill displays a human-readable percentage as a convenience, but the raw pair is the source of truth.
-- **Trial / developer / non-production sites cannot be scanned.** The service rejects with `A010` (invalid state) — same exit code as malformed arguments, so the skill cannot auto-classify. Surface the stderr message verbatim so the user can see what's blocking.
+- **`A010` means invalid input, not site state.** `A010` can surface from `--quick` (missing / bad LCID, malformed portal id) or `--deep` (malformed portal id). Exit 5 carries it. Surface the stderr message verbatim so the user can see which input is being rejected.
+- **`--quick` requires an LCID.** The diagnostic service expects a Microsoft Locale ID (e.g. `1033` for en-US) to choose the language of the returned messages. Omitting `--lcid` is rejected with `A010`. When the user does not specify a language, default to `1033`.
 - **Rate limits apply.** There are daily and weekly caps on scans per site. When exceeded, the service returns a generic server error (exit 1 / transport). Wait and retry later is the only mitigation — this cap is not configurable from here.
 - **A fresh site with no completed deep scan has no report and no score.** `--report` and `--score` both surface that as a distinct stderr message and exit code 1. Run a deep scan first.
-- **Report delivery through this skill is structured JSON, not a PDF.** The Studio interface offers a PDF download of the summary report; the skill fetches the machine-readable structured version. If the user wants the PDF specifically, tell them to use Studio.
 
 ## Workflow
 
@@ -91,14 +86,14 @@ Use `AskUserQuestion` to confirm intent. The skill supports four actions; each s
 
 | Intent | Command | Duration | Blocks session |
 |---|---|---|---|
-| Quick diagnostic scan | `--quick` | Seconds | Yes (synchronous) |
+| Quick diagnostic scan | `--quick --lcid <id>` (e.g. `--lcid 1033` for en-US) | Seconds | Yes (synchronous) |
 | Start a deep scan | `--deep` | Long-running server-side; start returns in seconds | No — skill exits after accepting the start |
 | Fetch the latest deep-scan report | `--report` | Seconds | Yes |
 | Fetch the security score | `--score` | Seconds | Yes |
 
 For quick vs deep, explain the difference before asking — users frequently conflate them. If the user says "scan my site" without specifying, quick is the sensible default for a first interaction (instant feedback), and deep is the right pick when they want OWASP coverage.
 
-For authenticated-page coverage, repeat the scope note from the top of this file and point at Studio.
+If the user asks for authenticated-page coverage, point them at Studio.
 
 ### Phase 4 — Execute the action
 
@@ -119,7 +114,7 @@ Branch on the command's exit code. Full table in `references/commands.md`. The o
 
 - Exit `3` (`A001`, portal not found): re-resolve via `website.js`.
 - Exit `4` (`Z003`, scan already ongoing): for `--deep`, tell the user a scan is in flight and offer to poll `--ongoing` or wait. Do NOT retry `--deep`. For `--report` / `--score`, it means the running scan hasn't finished — poll `--ongoing` and re-fetch when it completes.
-- Exit `5` (`A010`, invalid input or state): interpret the stderr message — the site may be trial / developer / non-production (not scannable), or the arguments may be malformed. Surface the message to the user and stop.
+- Exit `5` (`A010`, invalid input): interpret the stderr message — typical causes are a bad LCID on `--quick` or a malformed portal id. Surface the message to the user and stop.
 - Exit `2` (invalid CLI arguments): re-read `commands.md`, correct the flag, retry.
 - Exit `1` (unknown / transport / rate-limited): surface the stderr verbatim. If the message indicates rate limiting, tell the user the site's daily or weekly scan cap is exhausted and the only mitigation is to wait.
 
@@ -129,7 +124,7 @@ Do not retry exit codes `4` or `5` — those are state refusals that will not re
 
 The Phase 5 shape depends on which action ran in Phase 4:
 
-**`--quick` ran** — the stdout is an array of diagnostic items. Group by `result` (Pass / Error / Warning / Information) and present a summary count, then list the errors and warnings in detail with their description and documentation link. Skip the Pass items unless the user asks for the full list.
+**`--quick` ran** — the stdout is an array of diagnostic items. Each item has `issue` (title), `category`, `result` (one of Pass / Error / Warning / Information), `description`, and `learnMoreUrl`. Group by `result`, present a summary count, then list the errors and warnings in detail with their description and documentation link. Skip the Pass items unless the user asks for the full list.
 
 **`--deep` started** — acknowledge that the scan is running server-side. Tell the user:
 - Expected duration: a substantial wait server-side — the completion email is the authoritative signal; the skill should not poll tightly.
@@ -145,7 +140,7 @@ The Phase 5 shape depends on which action ran in Phase 4:
 
 After acknowledgment, Phase 5 is done — do NOT spin on `--ongoing` for the full scan duration; it is long enough to exhaust the session.
 
-**`--report` ran** — the stdout is a structured report object with `totalRules`, `failedRules`, vulnerability counts, timestamps, and a grouped rule list. Present a summary (counts + start/end times) and then drill into the failed rules with their descriptions. Do not dump the full pass list.
+**`--report` ran** — the stdout is a structured report object with `TotalRuleCount`, `FailedRuleCount`, `TotalAlertCount`, `UserName` (who started the scan), `StartTime`, `EndTime`, and a `Rules` array grouped by rule (each entry has `RuleId`, `RuleName`, `RuleStatus`, `AlertsCount`, and `Alerts`). Each alert carries `AlertName`, `Description`, `Mitigation`, and a `Risk` rank (0=Informational, 1=Low, 2=Medium, 3=High). Present a summary (counts + start/end times) and then drill into the failed rules with their alerts' descriptions and mitigations. Do not dump the full pass list.
 
 **`--score` ran** — the stdout is `{ totalRules, succeededRules }`. Compute and show a percentage as well as the raw pair. Tell the user the source scan's timestamp if they want context (they can fetch it via `--report`).
 

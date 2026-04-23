@@ -13,9 +13,8 @@ description: >-
   policy change, CORS, cross-origin, preflight failure, SameSite
   cookies, iframe embedding, clickjacking, or wants a header audit —
   even if they do not use the exact phrase "security header" or name
-  the specific header. Out of scope: `Strict-Transport-Security`
-  (Power Pages-managed — not settable) and `Cache-Control` (also
-  Power Pages-managed); direct deployment to Dataverse (use `/deploy-site`).
+  the specific header. Out of scope: `Strict-Transport-Security` and
+  `Cache-Control` (Power-Pages-managed).
 user-invocable: true
 argument-hint: "[optional: audit, csp, cors, samesite]"
 allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
@@ -32,16 +31,13 @@ Configure HTTP security headers for a Power Pages site by writing site-setting Y
 - **Plan a change** — based on user intent, compose a new or updated setting. For CSP specifically, scan the project for external URLs and propose an allowlist that covers both the site's own code and the Power-Pages-runtime sources a working site needs.
 - **Apply** — write or update the YAML file. Deployment happens downstream via `/deploy-site`; this skill stops at the file write.
 
-`Strict-Transport-Security` is NOT settable here — Power Pages emits it unconditionally on HTTPS with a long max-age, `includeSubDomains`, and `preload`. If the user asks to configure HSTS, tell them it is Power Pages-managed and cannot be overridden. `Cache-Control` is similarly Power Pages-managed.
-
 ## When to load which reference
 
 - `references/headers.md` — load when the user asks about a specific header (what it does, accepted values, site-setting name), when planning CSP directives, when configuring CORS (especially `Allow-Credentials` and wildcard-Origin quirks), or when the agent needs the list of Power-Pages-runtime sources a CSP must allow.
 
 ## Gotchas
 
-- **HSTS is Power Pages-managed.** Writing `HTTP/Strict-Transport-Security` is rejected by the script with a distinct exit code. Do not work around this — the header is already emitted on every HTTPS response.
-- **Cache-Control is also Power Pages-managed.** Anonymous static files receive `Cache-Control: public` with a default max-age; this is not maker-configurable.
+- **HSTS and Cache-Control are Power-Pages-managed.** Writing `HTTP/Strict-Transport-Security` is rejected with exit code `3`; do not work around it.
 - **No value validation.** The runtime passes header values through verbatim — malformed CSP or CORS strings silently produce broken headers. Use `--dry-run` on `security-headers.js` to catch local YAML / name issues, but the value itself is the author's responsibility.
 - **CSP is pass-through, not merged.** The runtime does NOT add Power-Pages-runtime sources automatically to your CSP. If your policy omits the runtime's `content.powerapps.*` sources, runtime resources fail to load and parts of the site will not render. Use `scan-external-urls.js` to get the full allowlist, including the runtime dependencies.
 - **Use the `'nonce'` keyword in `script-src`, not `'unsafe-inline'`, for inline scripts.** The runtime replaces `'nonce'` with a per-request random value and auto-injects hashes for inline event handlers. Removing `'nonce'` from the directive silently disables that mechanism.
@@ -49,9 +45,9 @@ Configure HTTP security headers for a Power Pages site by writing site-setting Y
 - **Report-Only is a separate site-setting**, not a flag on the main CSP setting. Name: `HTTP/Content-Security-Policy-Report-Only`. You can run both at once — the standard iteration path is: start with report-only, review browser-console violations, add sources incrementally to the enforcing policy, then delete the report-only setting.
 - **CORS `Allow-Credentials` only accepts `true`.** There is no `false` value — to disable credentials, omit the setting entirely. Writing `false` produces an invalid header that browsers ignore for credentialed requests.
 - **CORS `Allow-Origin: *` is auto-specialized.** The runtime replaces `*` with the specific requesting Origin on each response. This means `*` behaves like "reflect the Origin", not like a public wildcard — important for CDN / cache design.
-- **A site-setting change triggers a soft restart.** Once `/deploy-site` writes the YAML change to Dataverse, the site-setting update triggers a soft restart of the site (no downtime). Header changes take effect after the restart has propagated — there may be a brief delay before they are visible. This is still much faster than WAF rule changes (which can take up to an hour at the edge). Verify after a short wait in an incognito browser tab or with curl.
-- **Maker-mode traffic bypasses all `HTTP/*` headers entirely.** Requests coming from Power Pages Studio or other detected maker tools skip header emission so maker functionality isn't broken by a restrictive policy. This means viewing the site through maker tools won't show your headers; verify with an incognito browser tab or curl.
-- **Forbidden setting names.** Only `HTTP/Strict-Transport-Security` is explicitly rejected. Other names outside the recognized catalogue are accepted but silently ignored at runtime — `--audit` marks them as `custom` so you can spot typos.
+- **A site-setting change triggers a soft restart.** After `/deploy-site` writes the change to Dataverse, header changes take effect once the restart propagates — there may be a brief delay. Verify after a short wait in an incognito browser tab or with curl.
+- **Maker-mode traffic bypasses all `HTTP/*` headers entirely.** Requests from Power Pages Studio or other detected maker tools skip header emission. Viewing the site through maker tools won't show your headers — verify with an incognito browser tab or curl.
+- **`--audit` marks non-catalogue names as `custom`.** The runtime emits any `HTTP/*` site-setting it finds, including names outside the recognized catalogue — so typos become real (broken) headers on the wire. The `custom` marker is the author's cue to confirm the name was intentional.
 
 ## Workflow
 
@@ -97,7 +93,7 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/security-headers/scripts/scan-external-urls.j
   --projectRoot "<project-root>"
 ```
 
-The output groups discovered URLs by CSP directive (`script-src`, `style-src`, `img-src`, `font-src`, `connect-src`, `frame-src`) and includes a `runtimeDependencies` bucket with the Power-Pages-runtime sources every Power Pages site requires.
+The output groups discovered URLs by CSP directive (`script-src`, `style-src`, `img-src`, `font-src`, `connect-src`, `frame-src`) and includes a `runtimeDependencies` bucket with the **cloud-agnostic** Power-Pages-runtime sources every Power Pages site requires (e.g., `'self'`, `'nonce'`, `'unsafe-inline'`, `https:`, `data:`). The cloud-specific `content.powerapps.*` host for `script-src` is NOT in this bucket — the agent composes it separately in Phase 3 after detecting the site's cloud via `pac auth who`.
 
 **Build the plan with the plan-validate-execute pattern:**
 

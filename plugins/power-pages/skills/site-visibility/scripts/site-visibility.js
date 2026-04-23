@@ -2,11 +2,6 @@
 
 // site-visibility.js — flips a Power Pages site between Public and Private.
 //
-// Reading the current visibility is handled elsewhere: call
-// `scripts/lib/website.js --websiteRecordId <guid>` and read the
-// `SiteVisibility` field on the returned website record. This script
-// only handles the write; the record read is the source of truth.
-//
 // The flip restarts the site; callers that re-read the website record
 // immediately afterwards may still see the old value. Allow 30-60s for
 // propagation.
@@ -22,10 +17,12 @@
 const { parseArgs } = require('node:util');
 const { callAdminApi } = require('../../../scripts/lib/admin-api');
 
+// The CLI accepts only these exact spellings. The admin surface itself accepts
+// either case and normalises to lowercase server-side, but the CLI stays
+// deterministic by rejecting anything else locally before a network call.
 const VALID_VISIBILITY = new Set(['Public', 'Private']);
 
 // Exit codes — documented in --help and in this skill's references/commands.md.
-// Kept narrow: one code per user-actionable failure class.
 const EXIT = Object.freeze({
   OK: 0,
   UNKNOWN: 1,          // transport / unknown failure after retries
@@ -56,7 +53,10 @@ Options:
   --portalId <guid>         Power Pages portal id. Resolve via
                             scripts/lib/website.js first — this is NOT the
                             website record id stored in .powerpages-site.
-  --value <Public|Private>  Target visibility. Case-sensitive.
+  --value <Public|Private>  Target visibility. CLI accepts only these exact
+                            spellings; the admin surface normalises the stored
+                            value to lowercase, so subsequent reads return
+                            "public" or "private".
   --dry-run                 Validate inputs and print the intended call without
                             contacting the admin API. Exits 0 on success.
   -h, --help                Show this help.
@@ -69,12 +69,17 @@ Output:
 
 Exit codes:
   0  Success (or successful --dry-run).
-  1  Unknown or transport-level failure (after automatic retries).
+  1  Unknown, transport, or uncategorised failure (after automatic retries).
+     Raw stderr carries any service error code (A009, A010, A019, A033, ...)
+     that was not mapped to one of the codes below.
   2  Invalid or missing CLI arguments.
-  3  Portal not found (A001).
+  3  Portal not found (A001) — unknown id, deleted site, or the caller's auth
+     context is pointing at a different tenant / environment.
   4  Caller not authorized to flip visibility (A037).
-  5  Tenant governance policy blocks non-production → Public (A039).
-  6  Developer site — cannot be made Public; no admin can override (D005).
+  5  Non-production site blocked from going Public by tenant governance
+     policy (A039).
+  6  Developer site — visibility cannot be changed to Public on a developer
+     environment (D005).
 `;
 
 /**
@@ -151,7 +156,13 @@ async function updateSiteVisibility({
   }
 
   if (res.statusCode >= 400) {
-    const cataloguedCode = extractErrorCode(res.body);
+    let cataloguedCode = extractErrorCode(res.body);
+    // For this operation, Caller not authorized to flip visibility (A037).
+    // The platform strips the error body on 401 so the code
+    // is not recoverable from the body — infer it from the status.
+    if (!cataloguedCode && res.statusCode === 401) {
+      cataloguedCode = 'A037';
+    }
     const suffix = cataloguedCode ? ` (${cataloguedCode})` : '';
     const err = new Error(
       `updateSiteVisibility failed: HTTP ${res.statusCode}${suffix}`,
@@ -199,9 +210,6 @@ async function main() {
     return;
   }
 
-  // --dry-run runs the same local validation as a real call but skips the
-  // admin API. Success implies "the call would have been made with these
-  // arguments" — it does not mean the upstream service would have accepted it.
   if (args['dry-run']) {
     if (!args.portalId || typeof args.portalId !== 'string') {
       exitWithMessage(EXIT.INVALID_ARGS, 'portalId is required');

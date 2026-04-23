@@ -9,10 +9,7 @@ description: >-
   allowlist or blocklist, blocking bots, managed rules, OWASP rules,
   DDoS protection rules, false positives on legitimate traffic, or a
   user-agent ban — even if they do not use the exact phrase "Web
-  Application Firewall". Out of scope: WAF log retrieval (downloaded
-  from the Power Pages Studio interface under Security → Download
-  firewall logs) and any site-level IP allow-list unrelated to WAF
-  rules — those belong to other skills or admin tooling.
+  Application Firewall". Out of scope: WAF log retrieval.
 user-invocable: true
 argument-hint: "[optional: enable, disable, status, rules]"
 allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
@@ -25,8 +22,6 @@ model: opus
 
 Configure the Power Pages WAF: turn it on or off, write custom rules (geo, IP, URI, rate limit), and disable managed rules that block legitimate traffic. Each change is one command call behind a user approval — no batch application, no silent writes.
 
-WAF log retrieval is intentionally NOT in this skill. Logs live in the Dataverse `Power Pages Log` table (Type = `WAFLog`) and are downloaded from the Power Pages Studio interface under **Security → Download firewall logs**. Point the user there if they ask.
-
 ## When to load which reference
 
 - `references/commands.md` — when building any `--status`, `--rules`, `--enable`, `--disable`, `--create-rules`, or `--delete-custom` command line; when crafting the JSON body for rule-configuration operations; when interpreting exit codes on stderr.
@@ -37,17 +32,14 @@ WAF log retrieval is intentionally NOT in this skill. Logs live in the Dataverse
 - `pac pages list` and `.powerpages-site/website.yml` store the **website record id**, not the portal id. Every command here takes the portal id. Resolve by running `website.js --websiteRecordId <guid>` first.
 - Never resolve the site by name. Site names can duplicate inside an environment; only `--websiteRecordId` is safe.
 - A `null` from the resolver is diagnosable — the site is not deployed, or the PAC auth profile is pointing at a different environment than the one that owns the site.
-- **Production sites only.** Trial portals refuse every WAF operation with `B023`. WAF is available on production sites only — non-production site types are not supported. No workaround for trial beyond converting the site to production.
-- **Regional restrictions.** Singapore Local, China, and UAE block WAF entirely (`B022`). GCC, GCC High, and DoD allow enable/disable but block rule configuration. Surface the error verbatim and stop — these are not self-service fixes.
+- **Production sites only.** Trial portals refuse every WAF operation with `B023`. User must convert to production.
+- **Regional restrictions.** Singapore Local, China, and UAE block WAF entirely (`B022`). GCC, GCC High, and DoD allow enable/disable but block rule configuration — the rule-config refusal is surfaced as an `A010` / rule-config failure at the service and the skill cannot pre-block it locally. Surface the error verbatim and stop.
 - **Edge propagation takes up to an hour.** Rule changes reach the admin layer in seconds but can take up to an hour to reach all global edge locations. The skill polls briefly (5 minutes) for admin-layer convergence; full edge propagation is the user's responsibility to monitor.
 - **Async enable / disable / delete.** `--enable`, `--disable`, and `--delete-custom` return immediately with a polling pointer — the operation continues server-side. Do NOT treat acceptance as completion; poll `--status` / `--rules` in Phase 5.
 - **Concurrent-operation guard.** `B003` means another enable/disable is already in flight. Poll `--status` until it settles, then retry.
-- **Prevention mode only.** Managed rules block matching requests; there is no Detection / Audit-only mode. The only way to silence a false-positive managed rule is to disable it via a rule override.
-- **Custom rule vocabulary is narrow.** Match variables reduce to Geo, IP, and URI. Actions reduce to Allow and Block. There is no body / header / cookie / query-string match, no Log-only action, no Redirect action. If the user asks for something outside this vocabulary, tell them it is not exposed by the Power Pages WAF — they may be thinking of raw Azure Front Door, which is broader.
-- **Rate-limit window is 1–5 minutes.** Any other value will be rejected locally by `--dry-run`.
+- **False-positive managed rule:** disable it via a rule override (`enabledState: Disabled` inside `RuleGroupOverrides`).
 - **First-match-wins.** Rules evaluate in priority order and subsequent rules are skipped once one matches. A common mistake is writing a chain of rules assuming they run cumulatively — they do not. Geo-allow-then-default-deny requires an explicit default-deny rule AFTER the allow.
-- **No exclusions primitive.** False positives cannot be scoped to specific paths. The only mitigation is to disable the specific managed rule.
-- **Managed rules are Microsoft-updated.** Customers cannot pick a version; the rule set changes over time. A rule that behaves fine today may behave differently after an update.
+- **Custom rule priority starts at 11.** Values 1–10 are reserved for platform-managed rules; user rules at those values are rejected. Rate-limit windows are restricted to 1–5 minutes.
 - **`--create-rules` submits a full rule configuration.** Always read the current rules first (Phase 2), merge your changes into a complete plan, and submit the full target collection in one call. Submitting a partial body can have unpredictable effects on rules you did not mention.
 - **Use `--delete-custom` to remove individual custom rules by name.** Removing rules by omission from a `--create-rules` body is not reliable — the delete command is the safe path for targeted removal.
 
@@ -77,11 +69,11 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/web-application-firewall/scripts/waf.js" --st
 
 Interpret the three possible outcomes:
 
-- **JSON object** → WAF is available on this site. The body describes current state (enabled / disabled, any in-flight operation, log-capture settings).
+- **JSON string** → WAF is available on this site. The value is one of `Created` (WAF enabled), `Creating` (enable in progress), `Deleting` (disable in progress), `CreationFailed`, `DeletionFailed`, or `None` (never enabled, or fully removed). See `references/commands.md` for the full state table.
 - **`null`** → WAF is not applicable (region-blocked or trial portal). Tell the user and stop the skill.
 - **Non-zero exit** → a prerequisite or transport failure. Surface the stderr message and stop.
 
-If the current state already matches the user's intent (e.g., they asked to enable and WAF is already enabled), confirm and exit early.
+If the current state already matches the user's intent (e.g., they asked to enable and the status is already `Created`), confirm and exit early. If the status is `Creating` or `Deleting`, another operation is in flight — wait for it to settle before issuing a new one.
 
 If the user plans to change rules, also fetch the current rules:
 ```bash
@@ -161,7 +153,8 @@ Branch on the command's exit code. Full mapping in `references/commands.md`. The
 - Exit `5` (`B003`, another WAF operation in progress): run `--status` every 30–60 seconds until the in-flight operation settles, then retry the original command.
 - Exit `6` (`B022`, region unsupported): not a self-service fix. Stop and tell the user which regions are excluded.
 - Exit `7` (`B023`, trial portal): user must convert the site to production. Stop.
-- Exit `2` (invalid arguments or body): re-read `commands.md`, correct the flag or fix the body, retry.
+- Exit `2` (invalid arguments, body schema rejected, or `A010` from the service): re-read `commands.md`, correct the flag or fix the body, retry.
+- Exit `8` (`A019` / `A033`, caller-config): the portal id is not a valid GUID, or the authenticated caller's tenant does not match the site's tenant. Re-resolve the portal id via `website.js` and confirm the active PAC auth profile points at the tenant that owns the site. Distinct from exit `2` — this is a caller-config problem, not a body-shape problem.
 - Exit `1` (unknown or transport failure): surface the stderr message verbatim and stop. Authorization failures land in this bucket too — if the message indicates the caller is unauthorized, ask a site owner or tenant admin to re-run.
 
 Do not retry on exit codes `4`, `6`, or `7` — those are state refusals that no retry will fix.
@@ -170,8 +163,8 @@ Do not retry on exit codes `4`, `6`, or `7` — those are state refusals that no
 
 For **async operations** (`--enable`, `--disable`, `--delete-custom`), poll every 30–60 seconds for up to 5 minutes:
 
-- After `--enable`: `--status` reports WAF enabled and no operation in flight.
-- After `--disable`: `--status` reports WAF disabled and no operation in flight.
+- After `--enable`: `--status` reports `Created` (and not `Creating` / `CreationFailed`).
+- After `--disable`: `--status` reports `None` (and not `Deleting` / `DeletionFailed`).
 - After `--delete-custom`: `--rules` no longer lists the deleted rule names.
 
 If convergence has not happened within 5 minutes, do not claim success — show the user the current state, note that the admin layer is still settling, and ask how to proceed.
@@ -191,7 +184,6 @@ For the **sync operation** (`--create-rules`), the command's stdout already cont
 
 3. **Remind them**:
    - Edge propagation is up to an hour.
-   - To monitor WAF activity, download logs from the Power Pages Studio interface under **Security → Download firewall logs** and check the `Power Pages Log` Dataverse table filtered to Type `WAFLog`.
 
 > Reference: `${CLAUDE_PLUGIN_ROOT}/references/skill-tracking-reference.md`
 

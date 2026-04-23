@@ -1,15 +1,13 @@
 # Code-analysis frameworks and tools
 
-Single consolidated reference — the security frameworks this skill supports, which tool to use for each, install pointers, command specs for the bundled scripts, and what's explicitly out of scope.
+Single consolidated reference — the security frameworks this skill supports, which tool to use for each, install pointers, and command specs for the bundled scripts.
 
 ## Contents
 
 - [Supported frameworks → recommended tool](#supported-frameworks--recommended-tool)
-- [Out of scope](#out-of-scope)
 - [Semgrep — primary SAST tool](#semgrep--primary-sast-tool)
 - [CodeQL — deep SAST alternative for JS/TS](#codeql--deep-sast-alternative-for-jsts)
-- [Trivy — SCA and dependency CVE scanning](#trivy--sca-and-dependency-cve-scanning)
-- [Checkov — IaC misconfig scanning](#checkov--iac-misconfig-scanning)
+- [Trivy — SCA, dependency CVE, and license scanning](#trivy--sca-dependency-cve-and-license-scanning)
 - [Bring-your-own checklist](#bring-your-own-checklist)
 - [Command spec — `check-tools.js`](#command-spec--check-toolsjs)
 - [Command spec — `detect-languages.js`](#command-spec--detect-languagesjs)
@@ -26,23 +24,9 @@ Phase 2 of the skill asks the user which framework to assess against. Phase 3 th
 | **CWE / CWE Top 25** (SAST) | Semgrep | CodeQL | Semgrep has a dedicated CWE Top 25 ruleset (`p/cwe-top-25`) and tags findings with CWE IDs directly. CodeQL covers CWE via its rule metadata; use it when deep dataflow analysis is worth the longer scan time. |
 | **OWASP Top 10** (SAST aspect) | Semgrep | CodeQL | Semgrep has an OWASP Top 10 ruleset (`p/owasp-top-ten`) with direct OWASP category tags (`owasp:A01:2021`). CodeQL tags CWE but not OWASP directly. For the DAST aspect of OWASP Top 10, use `/security-scan`. |
 | **OWASP ASVS** | Semgrep | — | Semgrep ships an ASVS ruleset (`p/owasp-asvs`) that tags findings against ASVS control sections. No other OSS SAST CLI has a dedicated ASVS ruleset. |
-| **CVE / dependency vulnerabilities** | Trivy | Grype+Syft, OSV-Scanner, OWASP Dependency-Check | Trivy is the de facto standard — single binary, scans repos / containers / SBOMs / filesystems, tags by CVE + severity + package. It also flags packages whose upstream has reached end-of-life alongside the CVEs, which catches forward-looking risk even when no CVE is currently filed. The alternatives cover the same ground; pick based on user preference or existing CI. |
+| **CVE / dependency vulnerabilities** | Trivy | Grype+Syft, OSV-Scanner, OWASP Dependency-Check | Trivy is the de facto standard — single binary, scans filesystem / repo for dependency vulnerabilities, tags by CVE + severity + package. It also flags packages whose upstream has reached end-of-life alongside the CVEs, which catches forward-looking risk even when no CVE is currently filed. The alternatives cover the same ground; pick based on user preference or existing CI. |
 | **Dependency license audit** | Trivy | ScanCode, Syft (SPDX-license output) | Trivy classifies every declared dependency license into `restricted` (copyleft — GPL / AGPL / LGPL), `reciprocal` (weak copyleft — Mozilla-class), `permissive` (MIT / Apache / BSD / ISC), or `unknown`. For non-open-source / commercial sites, the first two groups plus every `unknown` entry need explicit user confirmation that the distribution model permits them. Combine with CVE in one pass via `--scanners vuln,license`. |
-| **IaC misconfig** | Checkov | Trivy config, tfsec | Checkov is the widest-coverage IaC scanner — Terraform, CloudFormation, Kubernetes, Helm, Dockerfile. Trivy's `config` mode covers IaC too and may already be installed for SCA. |
 | **Bring-your-own checklist** | User-supplied config / rules | — | User points at their own Semgrep rules, CodeQL query pack, or other config — the skill runs whichever primary tool fits. |
-
-## Out of scope
-
-These frameworks exist but are not served by this skill — different tooling or a different skill covers them:
-
-- **OWASP Top 10 — DAST aspect** (runtime vulnerabilities) → use `/security-scan` (ZAP-based dynamic scan).
-- **Cloud infrastructure compliance** (NIST SP 800-53, PCI DSS, HIPAA, SOC 2, GDPR, CIS benchmarks) → use Prowler, OpenSCAP, kube-bench, or similar cloud/host compliance tools directly. These scan provisioned cloud / host state, not site source code.
-- **Mobile app scanning** (OWASP MASVS / MSTG) → use MobSF directly. Not relevant for a Power Pages code site.
-- **LLM vulnerability scanning** (OWASP LLM Top 10) → use garak, PyRIT, or promptfoo directly. Not in this skill unless your site embeds LLM components.
-- **Threat modeling as code** (STRIDE) → use pytm or Threagile directly. Threat modeling is a design-time activity, not a scan target.
-- **Adversary emulation** (MITRE ATT&CK) → use Atomic Red Team or MITRE Caldera directly. Red-team workflow, not a source-code scan.
-
-If the user asks the skill to run any of these, explain the scope boundary and point at the named tool.
 
 ## Semgrep — primary SAST tool
 
@@ -95,7 +79,7 @@ codeql database analyze <db-path> <query-suite> --format=sarif-latest --output=<
 
 ## Trivy — SCA, dependency CVE, and license scanning
 
-**What it covers:** scans filesystems, containers, SBOMs, and git repos for dependency vulnerabilities (CVE-tagged by severity), dependency licenses, secrets, and IaC misconfigs. Single binary, no runtime dependency.
+**What it covers:** scans the code-site filesystem (lock files + `package.json`, and equivalent manifests in other ecosystems) for third-party dependency vulnerabilities (CVE-tagged by severity) and declared licenses. Single binary, no runtime dependency.
 
 **Install:** via a system package manager (`brew install trivy`, `apt install trivy`, `scoop install trivy`) or download the prebuilt binary from the official Trivy releases.
 
@@ -129,22 +113,9 @@ trivy fs \
 
 License findings are richer in JSON than in SARIF — emit JSON when licenses are in scope and parse the `Licenses` array per package. Each license is classified by Trivy as `restricted` (GPL / AGPL / LGPL copyleft), `reciprocal` (Mozilla-class weak copyleft), `permissive` (MIT / Apache / BSD / ISC), or `unknown`.
 
-Add `--scanners vuln,secret` to also scan for leaked secrets, or `--scanners vuln,misconfig` for IaC misconfig in the same run. Trivy also surfaces packages whose upstream has reached end-of-life (EOL) alongside CVE findings — call these out even when no CVE is currently filed, because an unmaintained package is a forward-looking risk.
+Add `--scanners vuln,secret` to also scan for leaked secrets in the same run. Trivy also surfaces packages whose upstream has reached end-of-life (EOL) alongside CVE findings — call these out even when no CVE is currently filed, because an unmaintained package is a forward-looking risk.
 
 **Duration:** fast — typically under a minute for small-to-medium projects. Can run synchronously without the background-launch pattern.
-
-## Checkov — IaC misconfig scanning
-
-**What it covers:** Terraform, CloudFormation, Kubernetes manifests, Helm, Serverless, ARM, Dockerfile, Bicep, secrets.
-
-**Install:** `pip install checkov` or `pipx install checkov`. Checkov is a Python package.
-
-**Invocation:**
-```bash
-checkov -d <project-root> -o sarif --output-file-path <sarif-path>
-```
-
-**Duration:** fast for small / medium IaC footprints. Can run synchronously.
 
 ## Bring-your-own checklist
 
@@ -161,7 +132,7 @@ Detect which of the supported CLIs are on PATH.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/code-analysis/scripts/check-tools.js" \
-  [--tool <semgrep|codeql|trivy|checkov>]
+  [--tool <semgrep|codeql|trivy>]
 ```
 
 **Read or write**: read.
@@ -207,7 +178,7 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/code-analysis/scripts/run-codeql.js" \
 
 Writes phase-marker files (`.state-create`, `.state-analyze`, `.state-done`, `.state-error`) next to the database so external pollers can see progress. Emits a structured JSON result on completion.
 
-Semgrep, Trivy, and Checkov are invoked directly from the skill body (single-command tools); only CodeQL warrants a wrapper because of its two-step workflow.
+Semgrep and Trivy are invoked directly from the skill body (single-command tools); only CodeQL warrants a wrapper because of its two-step workflow.
 
 ## Command spec — `parse-sarif.js`
 
@@ -234,7 +205,7 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/code-analysis/scripts/parse-sarif.js" \
 }
 ```
 
-Tags from each tool (CWE from CodeQL, OWASP + CWE from Semgrep, CVE IDs from Trivy, check IDs from Checkov) are surfaced verbatim. The skill interprets per-tool in Phase 6 without a cross-taxonomy mapping.
+Tags from each tool (CWE from CodeQL, OWASP + CWE from Semgrep, CVE IDs and license classes from Trivy) are surfaced verbatim. The skill interprets per-tool in Phase 6 without a cross-taxonomy mapping.
 
 ## Shared exit codes
 

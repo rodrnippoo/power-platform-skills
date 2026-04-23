@@ -20,7 +20,7 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/site-visibility/scripts/site-visibility.js" \
   [--dry-run]
 ```
 
-**Read or write**: write. Supports `--dry-run`, which validates the arguments locally and prints the intended call on stdout without contacting the admin API. A successful `--dry-run` does NOT imply the real call would succeed — upstream state checks (authorization, developer / non-production gate) only run when `--dry-run` is absent.
+**Read or write**: write. Supports `--dry-run`, which validates the arguments locally and prints the intended call on stdout without contacting the admin API. A successful `--dry-run` does NOT imply the real call would succeed — upstream state checks only run when `--dry-run` is absent.
 
 **Parameters**
 
@@ -47,16 +47,21 @@ On success the command prints `{ "updated": true }` to stdout and exits `0`.
 | `5` | Tenant governance policy blocks non-production → Public (`A039`). |
 | `6` | Developer site — cannot be made Public; no admin can override (`D005`). |
 
-Skills branch on the exit code and fall back to parsing the stderr message only when the exit code is `1` (unknown). `node site-visibility.js --help` emits the same table.
+Skills branch on the exit code and fall back to parsing the stderr message only when the exit code is `1` (unknown).
 
 **Errors this command can surface**
 
-| Code on stderr | Condition |
-|---|---|
-| `A001` | Portal id not found — wrong id, or site deleted |
-| `A010` | `--value` was not `Public` or `Private`, or a malformed portal id reached the service |
-| `A037` | Caller is not authorized to flip visibility — change refused |
-| `A039` | Trial or other non-production site blocked from Public by tenant governance — a tenant admin can adjust the governance policy to allow it |
-| `D005` | Developer site — cannot be made Public; not overridable by any admin |
+| Code on stderr | HTTP | Condition |
+|---|---|---|
+| `A001` | 404 | Portal id not found — wrong id, site deleted, or caller's auth context is pointing at a different tenant |
+| `A010` | 400 | Portal id segment is null / empty / whitespace, or `--value` was an input the service could not interpret as `public` or `private` |
+| `A019` | 400 | Portal id segment is not a valid GUID |
+| `A033` | 400 | Tenant id mismatch — the caller's token is for a different tenant than the resolved environment |
+| `A037` | 401 | Caller is not authorized to flip visibility — change refused |
+| `A039` | 400 | Non-production site blocked from going Public by tenant governance |
+| `A009` | 500 | Unhandled server-side failure |
+| `D005` | 400 | Developer site — visibility cannot be changed to Public on a developer environment |
 
-Transport-level failures (`HTTP 4xx` or `HTTP 5xx` without a catalogued code) are surfaced verbatim in the stderr message. Transient `401 / 429 / 5xx` classes are already retried internally — by the time the command exits non-zero for one of them, retry has already failed.
+Only `A001`, `A037`, `A039`, and `D005` are mapped to dedicated exit codes (`3`, `4`, `5`, `6`). The rest fall through to exit `1` with the raw stderr carrying the code and message so the caller can decide whether to retry or surface to the user.
+
+Transport-level failures (`HTTP 4xx` or `HTTP 5xx` without a catalogued code) are surfaced verbatim in the stderr message. Transient `401 / 429 / 500 / 502 / 503` classes are retried internally (up to two retries) — by the time the command exits non-zero for one of them, retry has already failed.

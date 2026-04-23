@@ -70,8 +70,8 @@ Output (stdout): a JSON object with fields:
   webRoles      — local web-role definitions read from
                   <projectRoot>/.powerpages-site/web-roles/*.webrole.yml,
                   shaped as { present, count, roles[] } or { error }.
-                  "Absent on a Private site" is a load-bearing signal the
-                  meta-skill uses to flag OWASP A01 findings.
+                  Feeds the unified security report and Phase 4's
+                  Public-site web-role-binding check.
 
 Exit codes:
   0  Success — every read completed (some may contain { error } fields).
@@ -164,8 +164,8 @@ function languagesScriptPath() {
  *                      fail-open pattern the other reads use
  *
  * Shape is intentionally minimal — the meta-skill cross-references with
- * `website.SiteVisibility` in Phase 4; absence of web roles on a Private
- * site is the load-bearing OWASP A01 signal this read exists to surface.
+ * `website.SiteVisibility` in Phase 4 and flags Public sites whose
+ * administratively-sensitive pages have no web role bound to them.
  */
 function readLocalWebRoles(projectRoot) {
   try {

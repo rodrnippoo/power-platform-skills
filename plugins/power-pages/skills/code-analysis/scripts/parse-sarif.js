@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 // parse-sarif.js — read a SARIF file (from any tool: CodeQL, Semgrep,
-// Trivy, Checkov, etc.) and produce a structured summary grouped by
-// rule, severity, and the tags each tool attached to its rules.
+// Trivy, etc.) and produce a structured summary grouped by rule,
+// severity, and the tags each tool attached to its rules.
 //
 // Different tools tag findings differently:
 //   CodeQL   — CWE via `external/cwe/cwe-NNN` on rule.properties.tags
 //   Semgrep  — CWE, OWASP, and category tags directly on results and rules
 //              (e.g. `cwe:CWE-89`, `owasp:A03:2021`)
-//   Trivy    — SCA findings with CVE IDs on ruleId + severity
-//   Checkov  — IaC resource type + check id
+//   Trivy    — SCA findings with CVE IDs on ruleId + severity; license
+//              findings with license classes (restricted / reciprocal / …)
 //
 // The skill interprets tags per-tool in its Phase 6; this script stays
 // generic — it surfaces tags verbatim without a cross-tool mapping.
@@ -38,8 +38,8 @@ const HELP = `Usage:
   parse-sarif.js --sarif <path> [--limit <N>]
   parse-sarif.js --help
 
-Reads a SARIF file from any supported tool (CodeQL, Semgrep, Trivy, Checkov,
-etc.) and produces a structured summary. Tags (CWE, OWASP, CVE, check ids)
+Reads a SARIF file from any supported tool (CodeQL, Semgrep, Trivy) and
+produces a structured summary. Tags (CWE, OWASP, CVE, license classes)
 are surfaced verbatim — this script does NOT map one taxonomy to another.
 The skill interprets tags per-tool in the presentation phase.
 

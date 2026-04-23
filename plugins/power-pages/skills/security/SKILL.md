@@ -3,20 +3,20 @@ name: security
 description: >-
   Orchestrates an end-to-end security review of a Power Pages site.
   Asks which framework to assess against (OWASP Top 10, CWE / CWE
-  Top 25, OWASP ASVS, CVE / dependency vulnerabilities, IaC
-  misconfiguration, or a bring-your-own checklist) and which
-  long-running scans to include (ZAP deep scan, Semgrep or CodeQL
-  SAST, Trivy SCA, Checkov IaC — recommended tools pre-selected);
-  runs the posture snapshot plus selected scans; presents findings
-  in a unified HTML report grouped by the framework's categories;
-  applies remediations with per-change approval, delegating to the
+  Top 25, OWASP ASVS, CVE / dependencies, or a bring-your-own
+  checklist) and which long-running scans to include (ZAP deep
+  scan, Semgrep or CodeQL SAST, Trivy SCA — recommended
+  pre-selected); runs the posture snapshot plus selected scans;
+  presents findings in a unified HTML report grouped by the
+  framework; applies remediations per-change, delegating to the
   skill that owns each concern (site-visibility,
   web-application-firewall, security-headers, security-scan,
   code-analysis, setup-auth, create-webroles, audit-permissions,
   deploy-site). Use when the user asks for a security review,
   audit, posture check, OWASP assessment, or hardening sweep —
   even if they do not name a framework. Out of scope: single-check
-  invocations (invoke that skill directly) and compliance
+  invocations (invoke that skill directly), IaC scanning (Power
+  Pages infrastructure is Microsoft-managed), and compliance
   frameworks beyond the ones listed.
 user-invocable: true
 argument-hint: "[optional: focus area, e.g. 'full review' or 'only CSP']"
@@ -42,7 +42,7 @@ Every change is one delegated invocation behind explicit user approval — no ba
 - **Delegate table-permission audits; do not reimplement them.** `/audit-permissions` already produces an HTML report at `docs/permissions-audit.html` with severity-grouped findings and delegates fixes to the `table-permissions-architect` agent. This skill INCLUDES those findings in the unified report and keeps a link back to the existing `permissions-audit.html` for deep-dive evidence. Do NOT parse permission YAML or re-query Dataverse from here.
 - **Auth / role remediations go through their own skills.** When the review surfaces an auth issue, the fix invokes `/setup-auth`. Role-based access fixes invoke `/create-webroles`. These skills have their own approval flows — do not bypass them with direct Dataverse writes.
 - **Long-running security checks do NOT block.** `/security-scan --deep` and `/code-analysis` SAST scans run in the background. Kick them off in Phase 3 as soon as the user has picked them in Phase 2, and let them run while the rest of the review proceeds. The HTML report shows partial results immediately; deeper findings append when the scans complete.
-- **Skip-all must be explicit and documented.** If the user unchecks every long-running scan in Phase 2, surface the concrete trade-off (the review will miss dynamic vulnerability findings, SAST dataflow findings, dependency CVEs, and IaC misconfigurations depending on which were unchecked — see Phase 2 for the exact disclosure text). Accept the skip if the user confirms, and note it in the report's "Framework used" header so the gap is visible to later readers.
+- **Skip-all must be explicit and documented.** If the user unchecks every long-running scan in Phase 2, surface the concrete trade-off (the review will miss dynamic vulnerability findings, SAST dataflow findings, and dependency CVEs depending on which were unchecked — see Phase 2 for the exact disclosure text). Accept the skip if the user confirms, and note it in the report's "Framework used" header so the gap is visible to later readers.
 - **Cross-cloud runtime sources.** When proposing CSP remediations in Phase 6, remember `/security-headers` needs the cloud-specific `content.powerapps.*` host — never propose a remediation that lists all four clouds' hosts together. Delegate to `/security-headers` which handles this.
 - **Per-change approval is mandatory.** Phase 6 pauses with `AskUserQuestion` before every remediation. The user can accept, skip, or defer each finding individually — never batch-approve.
 
@@ -76,7 +76,6 @@ Ask two questions sequentially with `AskUserQuestion`. Use plain, user-friendly 
 | OWASP ASVS | Findings tagged against OWASP Application Security Verification Standard control sections. |
 | CVE / dependency vulnerabilities (SCA) | Third-party dependency vulnerabilities tagged by CVE and severity. Also surfaces packages whose upstream has reached end-of-life (deprecated / unmaintained) so they can be planned for replacement before they become CVE targets. |
 | Dependency license audit | Every third-party dependency's declared license, classified copyleft (GPL / AGPL / LGPL) / weak-copyleft (Mozilla-class) / permissive / unknown. Particularly important for non-open-source / commercial sites — the user needs to confirm they have a license to distribute any copyleft or unknown entries. |
-| IaC misconfiguration | Infrastructure-as-code misconfigurations (Terraform, CloudFormation, Kubernetes, Helm, Dockerfile). |
 | Bring-your-own checklist | User-supplied checklist (markdown / text / YAML) or tool config (Semgrep rules, CodeQL query pack). |
 
 If the user asks "which should I pick", OWASP Top 10 is the most common for general posture reviews — but do not pre-select it.
@@ -98,7 +97,6 @@ Label the skip-all path **"Bypass long-running scans (not recommended)"** in the
 > - Dynamic vulnerability findings (injection, SSRF, TLS misconfig, confirmed exploits) — these require the ZAP deep dynamic scan
 > - Static-code dataflow findings (CWE-79 XSS, CWE-89 SQL injection, CWE-78 command injection, and similar classes) — these require a SAST scan (Semgrep or CodeQL)
 > - Third-party dependency CVEs — these require Trivy
-> - IaC misconfigurations — these require Checkov
 >
 > Confirm you want to proceed without any long-running scans.
 
@@ -122,7 +120,7 @@ The output is a single JSON blob with:
 - Deep-scan state + latest report summary + score (from `scan.js --ongoing` / `--report` / `--score`)
 - HTTP/* site-settings audit (from `security-headers.js --audit`)
 - Detected project languages (from `detect-languages.js`)
-- Local web-role definitions from `.powerpages-site/web-roles/*.webrole.yml` (read inline by the snapshot script). Shape: `{ present, count, roles[] }` or `{ error }` when the directory / files can't be read. This is the signal Phase 4 uses to flag OWASP A01 when a Private site has zero web roles, or when a Public site lists web roles that are never bound to any page.
+- Local web-role definitions from `.powerpages-site/web-roles/*.webrole.yml` (read inline by the snapshot script). Shape: `{ present, count, roles[] }` or `{ error }` when the directory / files can't be read. Phase 4 uses this to flag OWASP A01 when a Public site lists web roles that are never bound to administratively-sensitive pages.
 
 Also invoke the existing table-permissions flow in parallel:
 ```
@@ -137,7 +135,6 @@ This produces `docs/permissions-audit.html`. Wait for that skill to complete bef
 - CodeQL SAST → `node "${CLAUDE_PLUGIN_ROOT}/skills/code-analysis/scripts/run-codeql.js" --projectRoot <path> --language javascript-typescript --querySuite <suite> --sarifOut <sarif-path>` via `Bash run_in_background: true`
 - Trivy SCA → `trivy fs --scanners vuln --format sarif --output <sarif-path> <project-root>` (usually sub-minute; can run synchronously)
 - Trivy dependency license audit → `trivy fs --scanners license --format json --output <license-path> <project-root>` (sub-minute; synchronous). If both SCA and license are in scope, combine into a single `--scanners vuln,license --format json` run and parse both outputs from one file.
-- Checkov IaC → `checkov -d <project-root> --output sarif --output-file-path <sarif-path>` (sub-minute; can run synchronously)
 
 Ruleset / query-suite defaults follow the framework — see `skills/code-analysis/SKILL.md` Phase 4 (ruleset table) for the exact mapping. The scan completion hook at `plugins/power-pages/hooks/hooks.json` will surface results when the long-running scans finish; pick them up and fold into the report during Phase 5 or Phase 7.
 
@@ -145,20 +142,19 @@ Ruleset / query-suite defaults follow the framework — see `skills/code-analysi
 
 For each signal gathered in Phase 3, classify it as Critical / High / Medium or Passing check per the severity scheme in `references/orchestration.md`. Then organize findings by the framework chosen in Phase 2 — the framework is the organizing principle, not a separate layout decision.
 
-- **OWASP Top 10** — use the category → area mapping in `references/orchestration.md`. Each finding falls into A01–A10 based on the signal's source and nature. For web-role signals specifically: if `webRoles.present` is `false` or `webRoles.count` is `0` and the site is Private (`website.SiteVisibility === 'Private'`), raise a **High** finding under A01 ("Private site with no web roles — no role-based gating exists; access control relies solely on Entra authentication"). If the site is Public and web roles exist but the user has restricted pages that look like they should be gated (admin / settings / internal-sounding paths), raise a **Medium** finding under A01 recommending the user bind the web role to those pages via `/create-webroles`. Delegate every web-role fix to `/create-webroles`.
+- **OWASP Top 10** — use the category → area mapping in `references/orchestration.md`. Each finding falls into A01–A10 based on the signal's source and nature. For web-role signals: on a Public site, if pages look administratively sensitive (admin / settings / internal-sounding paths) but no web role binds to them, raise a **Medium** finding under A01 and route the fix to `/create-webroles`.
 - **CWE / CWE Top 25** — group by the CWE id on the finding. Posture-snapshot signals (WAF disabled, missing CSP, etc.) do not have native CWE ids; place them under the best-fit CWE (e.g., missing CSP → CWE-1021, WAF disabled → CWE-693) and annotate the mapping in the evidence line so the user can see the reasoning.
 - **OWASP ASVS** — group by ASVS section (V1 Architecture, V2 Authentication, V3 Session, V4 Access Control, V5 Validation, …). Semgrep ASVS rules tag directly; posture signals need manual section assignment with evidence annotation.
 - **CVE / SCA** — group by package name, ordered by highest severity CVE per package. The review has nothing useful to say in this framework without the SCA tool (Trivy) — if the tool was unselected, Phase 2 already warned the user.
-- **IaC misconfig** — group by resource type (e.g., Terraform resource, K8s kind, Dockerfile stanza). Same constraint as SCA — if Checkov / Trivy config mode was unselected, there are no findings to report.
 - **Bring-your-own checklist** — each checklist item becomes a bucket. Decide which checklist item each signal fulfills or violates; findings land in the matching bucket with their severity and evidence. Items with no matching signal are flagged as manual-review in the report.
 
-Severity assignment and source-area identification apply regardless of framework. The findings JSON schema in `references/orchestration.md` supports framework-specific category IDs — `categories[].id` is `A01` for OWASP, `CWE-79` for CWE, `V2.1` for ASVS, the package name for SCA, the resource type for IaC, or the checklist-item slug for bring-your-own.
+Severity assignment and source-area identification apply regardless of framework. The findings JSON schema in `references/orchestration.md` supports framework-specific category IDs — `categories[].id` is `A01` for OWASP, `CWE-79` for CWE, `V2.1` for ASVS, the package name for SCA, or the checklist-item slug for bring-your-own.
 
 If the argument-hint captured a focused scope (e.g., "only CSP and WAF"), drop any signals outside the described scope before organizing. The framework still governs how the in-scope findings are grouped.
 
 ### Phase 5 — Present findings in a unified HTML report
 
-Build a findings JSON that matches the schema in `references/orchestration.md`, then render:
+Build a findings JSON that matches the schema in `references/orchestration.md`. **For OWASP Top 10 reviews**, before invoking the renderer, merge `permissionsAudit.findings[]` into `categories[id=A01].findings` so audit-permissions findings render inline with every other A01 finding. For every other framework (CWE, ASVS, SCA, license, bring-your-own), leave them in `permissionsAudit.findings[]` so the standalone Table Permissions section renders. Then render:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/security/scripts/render-report.js" \
@@ -166,11 +162,13 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/security/scripts/render-report.js" \
   --output docs/security-review.html
 ```
 
+Pass `--dry-run` to validate the findings JSON + template path and compute the rendered byte count without writing `docs/security-review.html` — the script prints `{ dryRun, wouldWrite, bytes, severityCounts }` on stdout. Use this to sanity-check the JSON before committing to a write.
+
 The report includes, in this order:
-- Executive summary (counts by severity + counts by the framework's own category axis — A01–A10 for OWASP, CWE-NNN for CWE, section id for ASVS, package for SCA, resource type for IaC, checklist item for bring-your-own)
+- Executive summary (counts by severity + counts by the framework's own category axis — A01–A10 for OWASP, CWE-NNN for CWE, section id for ASVS, package for SCA, checklist item for bring-your-own)
 - Framework used, timestamp, portal id + site name, and which long-running scans were included vs. skipped
 - Per-category finding list, each finding showing: description, evidence (what was checked and what was seen), severity, source area, suggested remediation, and status (open / fixed / deferred).
-- **Table-permissions section that INCLUDES the findings from `/audit-permissions`** re-rendered under the unified severity scheme, with a prominent "Full evidence: docs/permissions-audit.html" link back to the original report. Do NOT duplicate the `permissions-audit.html` doc — link to it.
+- **Table-permissions findings**: folded into A01 for the OWASP framework (the Table Permissions tab becomes a deep-link back to `docs/permissions-audit.html`); rendered as a standalone Table Permissions section with the 4-stat grid and a prominent "Full evidence: docs/permissions-audit.html" link for every other framework. Do NOT duplicate the `permissions-audit.html` doc — link to it.
 - Pending long-running results banner: if a deep scan or SAST is still running, the report carries a "Additional findings pending from <scan-type>" notice with the polling command.
 
 Open the report in the browser (or tell the user the path) and pause here for review before any remediation.
@@ -190,7 +188,7 @@ Delegation map (full version in `references/orchestration.md`):
 | WAF enable/disable/rules | `/web-application-firewall` | Admin-layer WAF changes |
 | Visibility (Public/Private) | `/site-visibility` | Admin-layer visibility flip |
 | Dynamic scan (verification after hardening) | `/security-scan` | Quick sync scan or deep async scan |
-| Static-code finding (dependency CVE, SAST) | `/code-analysis` | Framework-driven SAST / SCA / IaC |
+| Static-code finding (dependency CVE, SAST, dependency license) | `/code-analysis` | Framework-driven SAST / SCA / license audit |
 | Deploy any Dataverse-bound change | `/deploy-site` | Push the YAML / site-setting changes |
 
 After each successful remediation, update the `status` field in the findings JSON and re-render the HTML report so the "fixed" markers appear. Capture before / after state on anything that touched Dataverse — the report's `remediation` block shows both.

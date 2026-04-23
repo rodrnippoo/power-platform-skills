@@ -33,10 +33,21 @@ const EXIT = Object.freeze({
   IN_PROGRESS: 5,        // B003
   REGION_BLOCKED: 6,     // B022
   TRIAL_BLOCKED: 7,      // B023
+  // A019 / A033 — caller-config issue (portal id not a GUID, or tenant
+  // mismatch). Distinct from A010 (service rejected body) and exit 2
+  // (local CLI args).
+  CALLER_CONFIG: 8,
 });
 
+// Note: A010 stays on exit 2. A010 cannot fire pre-send because the local
+// body validator catches malformed shapes first; when the service returns
+// A010 it's still a body-schema reject, which is the same user-visible
+// category as "invalid body file" (exit 2).
 const CATALOGUED_EXIT = Object.freeze({
   A001: EXIT.NOT_FOUND,
+  A010: EXIT.INVALID_ARGS,
+  A019: EXIT.CALLER_CONFIG,
+  A033: EXIT.CALLER_CONFIG,
   B001: EXIT.NO_INFRASTRUCTURE,
   B003: EXIT.IN_PROGRESS,
   B022: EXIT.REGION_BLOCKED,
@@ -46,8 +57,59 @@ const CATALOGUED_EXIT = Object.freeze({
 const VALID_RULE_TYPES = new Set(['Custom', 'Managed']);
 const VALID_CUSTOM_RULE_TYPES = new Set(['MatchRule', 'RateLimitRule']);
 const VALID_CUSTOM_RULE_ACTIONS = new Set(['Allow', 'Block', 'Log', 'Redirect']);
+const VALID_MANAGED_RULE_SET_ACTIONS = new Set(['Block', 'Log', 'Redirect']);
+const VALID_MATCH_VARIABLES = new Set([
+  'RemoteAddr',
+  'RequestMethod',
+  'QueryString',
+  'PostArgs',
+  'RequestUri',
+  'RequestHeader',
+  'RequestBody',
+  'Cookies',
+  'SocketAddr',
+]);
+const VALID_MATCH_OPERATORS = new Set([
+  'Any',
+  'IPMatch',
+  'GeoMatch',
+  'Equal',
+  'Contains',
+  'LessThan',
+  'GreaterThan',
+  'LessThanOrEqual',
+  'GreaterThanOrEqual',
+  'BeginsWith',
+  'EndsWith',
+  'RegEx',
+]);
+// Reference set of documented Exclusions[].selectorMatchOperator values
+// (mirrors the Azure Front Door ManagedRuleExclusionSelectorMatchOperator
+// enum). Kept for documentation; the validator does NOT reject unknown
+// values — Microsoft may add new operators over time, so the strict
+// checks are limited to required-non-empty-string shape.
+const KNOWN_EXCLUSION_SELECTOR_OPERATORS = new Set([
+  'Equals',
+  'EqualsAny',
+  'Contains',
+  'StartsWith',
+  'EndsWith',
+]);
+// Reference set of documented Exclusions[].matchVariable values. Same
+// "allow-through unknowns" policy as the operator set above.
+const KNOWN_EXCLUSION_MATCH_VARIABLES = new Set([
+  'RequestHeaderNames',
+  'RequestCookieNames',
+  'QueryStringArgNames',
+  'RequestBodyPostArgNames',
+  'RequestBodyJsonArgNames',
+]);
 const RATE_LIMIT_WINDOW_MIN_MINUTES = 1;
 const RATE_LIMIT_WINDOW_MAX_MINUTES = 5;
+// Lowest priority value accepted for a user-defined custom rule. Values
+// at or below this are reserved for platform-managed rules; service rejects
+// user rules with priority <= this bound.
+const CUSTOM_RULE_MIN_PRIORITY = 11;
 
 // Codes that represent "WAF is not applicable to this site" — trial portal
 // or region without the feature. The read commands normalize these to null
@@ -79,29 +141,48 @@ Common flags:
   -h, --help                               Show this help.
 
 Output:
-  stdout  JSON result on success. Async operations return
-          { "accepted": true, "operation_location": "...",
-            "retry_after_seconds": N }. Already-in-progress cases return
-          { "accepted": false, "alreadyOngoing": true }.
+  stdout  JSON result on success. Shapes:
+          --status     JSON string — one of Created, Creating, None,
+                       CreationFailed, Deleting, DeletionFailed — or null
+                       when WAF is not applicable (trial / region-blocked).
+          --rules      Without --ruleType: { ManagedRules, CustomRules }.
+                       --ruleType Custom: array of custom rule objects.
+                       --ruleType Managed: array of managed rule set
+                       definition objects. null when not applicable.
+          --create-rules  On success: { ManagedRules, CustomRules } echoing
+                       the stored rule set.
+          --enable / --disable / --delete-custom — async acceptance shape:
+                       { "accepted": true, "operation_location": "...",
+                         "retry_after_seconds": N }. Already-in-progress
+                       returns { "accepted": false, "alreadyOngoing": true }.
   stderr  Diagnostics, transient-retry notices, and catalogued service
-          error codes (A001 / B001 / B003 / B022 / B023) when applicable.
+          error codes (A001 / A010 / B001 / B003 / B022 / B023) when
+          applicable.
 
 Exit codes:
   0  Success.
   1  Unknown or transport failure (includes HTTP 401/403 for non-admin).
-  2  Invalid or missing CLI arguments, or invalid body file.
+  2  Invalid or missing CLI arguments, or invalid body file (A010).
   3  Portal not found (A001).
   4  Edge infrastructure missing for this site (B001).
   5  Another WAF operation is in progress (B003).
   6  WAF not available in this region (B022).
   7  Trial portal — WAF requires a production site (B023).
+  8  Caller-config issue — portal id not a GUID (A019) or tenant
+     mismatch (A033). Distinct from exit 2 (local arg / body).
 `;
 
 /**
  * Extract a catalogued service error code from a parsed response body.
  * The service uses a JSON envelope for most errors but returns plain-text
- * bodies for the region-unsupported / trial-unsupported 400 paths on
- * GetWAFStatus. Handle both shapes.
+ * bodies for the region-unsupported / trial-unsupported 400 paths on the
+ * status read. Handle both shapes.
+ *
+ * Region-unsupported plain-text phrase:
+ *   "Power Pages built-in WAF feature is not supported in <region> region."
+ * Trial-unsupported plain-text phrase:
+ *   "WAF is not supported for trial portals. Convert your trial portal
+ *    to a production portal to use this feature."
  */
 function extractErrorCode(body) {
   if (body && typeof body === 'object') {
@@ -114,8 +195,8 @@ function extractErrorCode(body) {
   }
   if (typeof body === 'string') {
     const lower = body.toLowerCase();
-    if (lower.includes('not supported for trial')) return 'B023';
-    if (lower.includes('not available')) return 'B022';
+    if (lower.includes('trial portal')) return 'B023';
+    if (lower.includes('not supported') || lower.includes('not available')) return 'B022';
   }
   return null;
 }
@@ -160,10 +241,9 @@ function throwWithCode(operation, res) {
 }
 
 /**
- * Extract async-handoff info from a 202 response. admin-api.js does not
- * currently expose response headers, so when not present we fall back to
- * DEFAULT_RETRY_AFTER_SECONDS — still useful to the caller even without
- * the operation-location URL.
+ * Extract async-handoff info from a 202 response. Callers must request
+ * headers explicitly (via `includeHeaders: true`) — when a header is
+ * absent we fall back to DEFAULT_RETRY_AFTER_SECONDS / null.
  */
 function extractAsyncHandoff(res) {
   const headers = res.headers || {};
@@ -240,6 +320,7 @@ async function toggleWaf(operation, { portalId, environmentId, cloud, deps } = {
     portalId,
     environmentId,
     cloud,
+    includeHeaders: true,
     deps,
   });
   if (res.statusCode === 409) {
@@ -247,6 +328,12 @@ async function toggleWaf(operation, { portalId, environmentId, cloud, deps } = {
   }
   if (res.statusCode === 202) {
     return { accepted: true, ...extractAsyncHandoff(res) };
+  }
+  // B003 can also surface as HTTP 400 with the catalogued code. Normalize
+  // both paths (409 and 400+B003) to the same alreadyOngoing shape so
+  // callers see identical output regardless of which the service picked.
+  if (res.statusCode >= 400 && extractErrorCode(res.body) === 'B003') {
+    return { accepted: false, alreadyOngoing: true };
   }
   throwWithCode(operation, res);
   // Non-standard success (e.g. 200 with empty body) — treat as accepted.
@@ -285,9 +372,12 @@ async function deleteWafCustomRules({ portalId, ruleNames, environmentId, cloud,
     environmentId,
     cloud,
     body: ruleNames,
+    includeHeaders: true,
     deps,
   });
   if (res.statusCode === 202) {
+    // deleteWafCustomRules only emits Operation-Location (no Retry-After);
+    // the polling interval falls back to the shared default.
     return { accepted: true, ...extractAsyncHandoff(res) };
   }
   throwWithCode('deleteWafCustomRules', res);
@@ -298,14 +388,8 @@ async function deleteWafCustomRules({ portalId, ruleNames, environmentId, cloud,
 
 /**
  * Validate the body passed to --create-rules. Returns an error message
- * string on failure, or null on success.
- *
- * Checks structure, enum values, and the local-only invariants that the
- * service would also reject (unique names, unique priorities, rate-limit
- * window range). Intentionally does NOT enforce the narrower Power Pages
- * surface (e.g. only Allow/Block actions) — surface-level constraints
- * live in the docs; the script mirrors the API's accepted schema so a
- * caller with legitimate need can still submit Log / Redirect actions.
+ * string on failure, or null on success. Checks structure, enum values,
+ * unique names, unique priorities, and rate-limit window range.
  */
 function validateCreateRulesBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -342,6 +426,9 @@ function validateCreateRulesBody(body) {
     if (!Number.isInteger(rule.priority)) {
       return `Custom rule "${rule.name}": priority is required and must be an integer`;
     }
+    if (rule.priority < CUSTOM_RULE_MIN_PRIORITY) {
+      return `Custom rule "${rule.name}": priority must be >= ${CUSTOM_RULE_MIN_PRIORITY} (lower values are reserved for platform-managed rules)`;
+    }
     if (seenPriorities.has(rule.priority)) {
       return `Duplicate priority ${rule.priority} between "${seenPriorities.get(rule.priority)}" and "${rule.name}"`;
     }
@@ -355,6 +442,10 @@ function validateCreateRulesBody(body) {
     if (rule.ruleType === 'MatchRule') {
       if (!Array.isArray(rule.matchConditions) || rule.matchConditions.length === 0) {
         return `Custom rule "${rule.name}": MatchRule requires at least one matchCondition`;
+      }
+      for (let i = 0; i < rule.matchConditions.length; i++) {
+        const condErr = validateMatchCondition(rule.name, i, rule.matchConditions[i]);
+        if (condErr) return condErr;
       }
     }
     if (rule.ruleType === 'RateLimitRule') {
@@ -381,8 +472,131 @@ function validateCreateRulesBody(body) {
     if (typeof managed.RuleSetAction !== 'string' || managed.RuleSetAction.length === 0) {
       return 'Every managed rule requires RuleSetAction';
     }
+    if (!VALID_MANAGED_RULE_SET_ACTIONS.has(managed.RuleSetAction)) {
+      return `Managed rule set "${managed.RuleSetType}": RuleSetAction must be one of ${[...VALID_MANAGED_RULE_SET_ACTIONS].join(', ')}`;
+    }
+    // Rule-set-level Exclusions (applied to every rule in the set).
+    const ruleSetExclusionsErr = validateExclusions(
+      managed.Exclusions,
+      `Managed rule set "${managed.RuleSetType}"`,
+    );
+    if (ruleSetExclusionsErr) return ruleSetExclusionsErr;
+
+    if (managed.RuleGroupOverrides !== undefined && !Array.isArray(managed.RuleGroupOverrides)) {
+      return `Managed rule set "${managed.RuleSetType}": RuleGroupOverrides must be an array when provided`;
+    }
+    for (const group of managed.RuleGroupOverrides || []) {
+      if (!group || typeof group !== 'object') {
+        return `Managed rule set "${managed.RuleSetType}": every RuleGroupOverride must be an object`;
+      }
+      if (typeof group.RuleGroupName !== 'string' || group.RuleGroupName.length === 0) {
+        return `Managed rule set "${managed.RuleSetType}": RuleGroupOverride requires RuleGroupName`;
+      }
+      // Rule-group-level Exclusions (applied to every rule in this group).
+      const groupExclusionsErr = validateExclusions(
+        group.Exclusions,
+        `Managed rule set "${managed.RuleSetType}": RuleGroupOverride "${group.RuleGroupName}"`,
+      );
+      if (groupExclusionsErr) return groupExclusionsErr;
+
+      if (group.Rules !== undefined && !Array.isArray(group.Rules)) {
+        return `Managed rule set "${managed.RuleSetType}": RuleGroupOverride "${group.RuleGroupName}": Rules must be an array when provided`;
+      }
+      for (const override of group.Rules || []) {
+        if (!override || typeof override !== 'object') {
+          return `Managed rule set "${managed.RuleSetType}": RuleGroupOverride "${group.RuleGroupName}": every override must be an object`;
+        }
+        if (typeof override.RuleId !== 'string' || override.RuleId.length === 0) {
+          return `Managed rule set "${managed.RuleSetType}": override requires RuleId`;
+        }
+        if (override.EnabledState !== undefined && override.EnabledState !== 'Enabled' && override.EnabledState !== 'Disabled') {
+          return `Managed rule set "${managed.RuleSetType}": override "${override.RuleId}": EnabledState must be Enabled or Disabled`;
+        }
+        if (override.Action !== undefined && !VALID_CUSTOM_RULE_ACTIONS.has(override.Action)) {
+          return `Managed rule set "${managed.RuleSetType}": override "${override.RuleId}": Action must be one of ${[...VALID_CUSTOM_RULE_ACTIONS].join(', ')}`;
+        }
+        // Rule-override-level Exclusions (scoped to this single rule).
+        const overrideExclusionsErr = validateExclusions(
+          override.Exclusions,
+          `Managed rule set "${managed.RuleSetType}": RuleGroupOverride "${group.RuleGroupName}": override "${override.RuleId}"`,
+        );
+        if (overrideExclusionsErr) return overrideExclusionsErr;
+      }
+    }
   }
 
+  return null;
+}
+
+/**
+ * Validate an Exclusions array attached to a rule-set, rule-group, or
+ * individual rule override. Exclusions is optional at every level; when
+ * present it must be an array of objects where matchVariable,
+ * selectorMatchOperator, and selector are all required non-empty strings.
+ * Unknown matchVariable / selectorMatchOperator values are allowed through
+ * (Microsoft may add new ones); only shape is enforced locally.
+ *
+ * Returns an error message string on failure, or null on success /
+ * when exclusions is undefined.
+ */
+function validateExclusions(exclusions, contextLabel) {
+  if (exclusions === undefined) return null;
+  if (!Array.isArray(exclusions)) {
+    return `${contextLabel}: Exclusions must be an array when provided`;
+  }
+  for (let i = 0; i < exclusions.length; i++) {
+    const ex = exclusions[i];
+    if (!ex || typeof ex !== 'object' || Array.isArray(ex)) {
+      return `${contextLabel}: Exclusions[${i}] must be an object`;
+    }
+    if (typeof ex.matchVariable !== 'string' || ex.matchVariable.length === 0) {
+      return `${contextLabel}: Exclusions[${i}] requires matchVariable as a non-empty string`;
+    }
+    if (typeof ex.selectorMatchOperator !== 'string' || ex.selectorMatchOperator.length === 0) {
+      return `${contextLabel}: Exclusions[${i}] requires selectorMatchOperator as a non-empty string`;
+    }
+    if (typeof ex.selector !== 'string' || ex.selector.length === 0) {
+      return `${contextLabel}: Exclusions[${i}] requires selector as a non-empty string`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Validate a single match condition object inside a MatchRule's
+ * matchConditions array. Returns an error message string or null.
+ */
+function validateMatchCondition(ruleName, index, cond) {
+  if (!cond || typeof cond !== 'object') {
+    return `Custom rule "${ruleName}" matchConditions[${index}]: must be an object`;
+  }
+  if (!VALID_MATCH_VARIABLES.has(cond.matchVariable)) {
+    return `Custom rule "${ruleName}" matchConditions[${index}]: matchVariable must be one of ${[...VALID_MATCH_VARIABLES].join(', ')}`;
+  }
+  if (!VALID_MATCH_OPERATORS.has(cond.operator)) {
+    return `Custom rule "${ruleName}" matchConditions[${index}]: operator must be one of ${[...VALID_MATCH_OPERATORS].join(', ')}`;
+  }
+  if (!Array.isArray(cond.matchValue) || cond.matchValue.length === 0) {
+    return `Custom rule "${ruleName}" matchConditions[${index}]: matchValue must be a non-empty array of strings`;
+  }
+  for (const v of cond.matchValue) {
+    if (typeof v !== 'string') {
+      return `Custom rule "${ruleName}" matchConditions[${index}]: matchValue entries must be strings`;
+    }
+  }
+  if (cond.negateCondition !== undefined && typeof cond.negateCondition !== 'boolean') {
+    return `Custom rule "${ruleName}" matchConditions[${index}]: negateCondition must be a boolean when provided`;
+  }
+  if (cond.transforms !== undefined) {
+    if (!Array.isArray(cond.transforms)) {
+      return `Custom rule "${ruleName}" matchConditions[${index}]: transforms must be an array of strings when provided`;
+    }
+    for (const t of cond.transforms) {
+      if (typeof t !== 'string') {
+        return `Custom rule "${ruleName}" matchConditions[${index}]: transforms entries must be strings`;
+      }
+    }
+  }
   return null;
 }
 
@@ -556,7 +770,18 @@ module.exports = {
   extractErrorCode,
   isWafUnavailable,
   validateCreateRulesBody,
+  validateMatchCondition,
+  validateExclusions,
   validateNamesList,
   VALID_RULE_TYPES,
+  VALID_CUSTOM_RULE_TYPES,
+  VALID_CUSTOM_RULE_ACTIONS,
+  VALID_MANAGED_RULE_SET_ACTIONS,
+  VALID_MATCH_VARIABLES,
+  VALID_MATCH_OPERATORS,
+  KNOWN_EXCLUSION_SELECTOR_OPERATORS,
+  KNOWN_EXCLUSION_MATCH_VARIABLES,
+  CUSTOM_RULE_MIN_PRIORITY,
   EXIT,
+  CATALOGUED_EXIT,
 };

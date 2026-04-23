@@ -25,7 +25,6 @@ The meta-skill's Phase 2 asks the user which framework to assess against, then a
 | **OWASP ASVS** | Semgrep with `p/owasp-asvs`; ZAP deep dynamic scan for runtime-verification controls | Semgrep | ASVS is primarily a verification standard; most controls are static. Include ZAP only if the user wants runtime verification of session / transport controls. |
 | **CVE / SCA** | Trivy filesystem scan (`--scanners vuln`, or `vuln,license` to fold in the license audit) | Trivy | SCA is the entire review in this framework — unchecking Trivy leaves the review with nothing to report. Warn the user and ask whether to re-select or switch framework. Trivy also flags end-of-life (deprecated) packages alongside CVEs; surface these even when no CVE is filed. |
 | **Dependency license audit** | Trivy filesystem scan (`--scanners license`, or `vuln,license` for a single-pass combined SCA+license run) | Trivy | Unchecking Trivy leaves nothing to report. When CVE / SCA is also in scope, prefer the combined `vuln,license` invocation — one walk of the dependency tree, both outputs. |
-| **IaC misconfig** | Checkov; Trivy `--scanners config` as an alternative | Checkov | Same constraint as SCA — unchecking both leaves nothing to report. |
 | **Bring-your-own** | Whichever tool the user specifies (Semgrep custom rules, CodeQL query pack, etc.) | User-specified | The user names the tool when they pick this framework; pre-select that tool. |
 
 **Tool availability caveat.** If a recommended tool is not installed on the user's machine (check via `skills/code-analysis/scripts/check-tools.js`), either (a) swap in the framework's alternative if present and call out the trade-off, or (b) surface an install pointer and mark the unavailable tool unchecked-with-reason so the user can see why. Never silently drop a tool from the list.
@@ -43,7 +42,6 @@ The framework the user picks in Phase 2 also determines how findings are grouped
 | **OWASP ASVS** | ASVS section id (e.g., `V2.1`, `V4.2`) | Semgrep ASVS rules tag directly. Posture signals need manual section assignment with evidence annotation. |
 | **CVE / SCA** | package name (one group per package, ordered by highest-severity CVE) | Within each package group, list CVEs in CRITICAL → HIGH → MEDIUM → LOW order. Call out end-of-life / deprecated upstreams in the package header even when no CVE is filed. |
 | **Dependency license audit** | license class (`restricted` → `reciprocal` → `unknown` → `permissive`) | Within each class, list packages alphabetically. For commercial / non-open-source sites, `restricted` / `reciprocal` / `unknown` groups are action items — the user confirms licensing per package or swaps the dependency. |
-| **IaC misconfig** | resource type (e.g., `terraform.aws.s3_bucket`, `kubernetes.Deployment`, `dockerfile`) | One group per resource type. |
 | **Bring-your-own** | Slug of each checklist item (e.g., `verify-csp-set`, `verify-waf-enabled`) | Each checklist item becomes a group. Items with no matching signal are flagged manual-review. |
 
 The report's executive summary always shows counts by severity regardless of framework, so "what should I fix first" is never lost. If the user captured a focused scope in the argument-hint (e.g., "only CSP and WAF"), drop out-of-scope signals before grouping; the framework's grouping still applies to what remains.
@@ -54,7 +52,7 @@ Each OWASP category can draw signals from multiple security areas. This table is
 
 | Category | Description | Signals from |
 |---|---|---|
-| **A01 Broken Access Control** | Resources / functions reachable without the right checks | `/site-visibility` (public site with no gating); `/audit-permissions` (overly-broad table-permission scope); posture-snapshot's `webRoles` read (absent / empty on a Private site, or present-but-unbound on a Public site — both flagged A01 and routed to `/create-webroles` for the fix); `/security-headers` (CORS that bypasses same-origin); `/code-analysis` (CWE-22 path traversal, CWE-284/285 improper authz) |
+| **A01 Broken Access Control** | Resources / functions reachable without the right checks | `/site-visibility` (public site with no gating); `/audit-permissions` (overly-broad table-permission scope); posture-snapshot's `webRoles` read (Public site with admin-looking pages but unbound web roles — routed to `/create-webroles` for the fix); `/security-headers` (CORS that bypasses same-origin); `/code-analysis` (CWE-22 path traversal, CWE-284/285 improper authz) |
 | **A02 Cryptographic Failures** | Data-in-transit or data-at-rest protections bypassed or misconfigured | `/security-headers` (HSTS is Power-Pages-managed — flag only if TLS is being disabled elsewhere); `/security-scan` deep scan (TLS misconfig, weak crypto detection) |
 | **A03 Injection** | SQLi, XSS, command injection, expression-language injection, etc. | `/security-scan` deep scan (dynamic reflection / confirmed injections); `/code-analysis` with Semgrep or CodeQL (static dataflow findings tagged CWE-79, CWE-89, CWE-78, CWE-917, etc.) |
 | **A04 Insecure Design** | Design-level weaknesses beyond mis-configuration | `/security-headers` (CORS `*` + credentials, overly-permissive CSP that defeats same-origin intent); `/site-visibility` (Private site without Entra-auth-required access list); `/audit-permissions` (design gaps the `table-permissions-architect` agent identifies) |
@@ -92,8 +90,8 @@ The unified report uses a four-level scheme aligned with the existing `audit-per
 | Level | Meaning |
 |---|---|
 | **Critical** | Active exploit path exists, or sensitive data is exposed. Fix before any further deploy. |
-| **High** | Significant weakness; a typical attacker could exploit it. Fix in the current sprint. |
-| **Medium** | Weakness that raises attack surface or indicates risky design. Fix in the next cycle. |
+| **High** | Significant weakness; a typical attacker could exploit it. Fix before the next release. |
+| **Medium** | Weakness that raises attack surface or indicates risky design. Fix as part of routine follow-up work. |
 | **Passing check** | Control is in place and working as intended. Surface in the report so users see what is NOT flagged — not everything is a problem. |
 
 Severity assignment guidance:
@@ -153,6 +151,16 @@ The `render-report.js` script consumes a single JSON file with this shape. Build
       "info": N,
       "pass": N
     },
+    "findings": [
+      {
+        "id": "tp-contact-read-anonymous",
+        "title": "Contact table grants Read to anonymous web role",
+        "severity": "critical",
+        "source": "audit-permissions",
+        "owner": "table-permissions-architect",
+        "evidence": "table-permission 'contact-anon-read' binds contact.Read to the Anonymous web role"
+      }
+    ],
     "note": "Full evidence lives in docs/permissions-audit.html; this summary is included under A01 Broken Access Control with deep-link to the original."
   }
 }
@@ -162,16 +170,19 @@ Key integrity rules for the JSON:
 - `categories[].id` is the OWASP short id (`A01`, `A02`, …) when using OWASP; for BYO-checklist it's a stable slug of the checklist item.
 - `remediation.appliedStatus` transitions `open → fixed | skipped | deferred` as Phase 6 proceeds.
 - `remediation.beforeValue` / `afterValue` are populated only when Phase 6 actually applies a change.
-- `permissionsAudit` is populated from the `audit-permissions` output; the report UI embeds its severity counts but links back to the original HTML for full evidence.
+- `permissionsAudit.findings[]` is a normalized array of audit-permissions findings — each carries a unified `severity` (`critical` / `high` / `medium` / `passing`), `title`, `evidence`, and `owner` (typically `table-permissions-architect`). How these findings render is framework-dependent:
+  - **OWASP Top 10** — the meta-skill MERGES `permissionsAudit.findings[]` into `categories[id=A01].findings` before invoking `render-report.js`, so they render inline with every other A01 finding. The standalone Table Permissions tab becomes a deep-link back to `docs/permissions-audit.html` for full evidence.
+  - **Other frameworks** (CWE, ASVS, SCA, license, bring-your-own) — audit-permissions does not map cleanly into those frameworks' categories, so the standalone Table Permissions tab renders with the 4-stat grid (Critical / High / Medium / Passing) and a prominent "Full evidence: docs/permissions-audit.html" link at the top.
+- `permissionsAudit.summary` is preserved for the non-OWASP standalone view and for the executive summary counts.
 
 ## `audit-permissions` integration
 
 Per the plugin's established pattern, the meta-skill must integrate with — not duplicate — `audit-permissions`:
 
 1. **Invoke `/audit-permissions`** during Phase 3 and wait for it to complete. Its output is the file at `docs/permissions-audit.html`.
-2. **Parse** that output (or its intermediate JSON if captured) to extract the severity counts and top findings.
-3. **Include** those findings under the unified report's A01 Broken Access Control category, with the severity counts surfaced in the summary and a prominent "Full evidence: docs/permissions-audit.html" link back.
-4. **Do not** re-render the full permission-audit findings inline — the original report is the deep-dive; the unified report is the cross-category view.
+2. **Parse** that output (or its intermediate JSON if captured) to build `permissionsAudit.findings[]` in the unified findings JSON — each finding carries a normalized `severity` (unified scheme), `title`, `evidence`, and `owner` (`table-permissions-architect`). Preserve the original severity counts in `permissionsAudit.summary`.
+3. **Merge for OWASP, standalone otherwise.** When the Phase 2 framework is OWASP Top 10, the meta-skill merges `permissionsAudit.findings[]` into `categories[id=A01].findings` BEFORE invoking `render-report.js`, so they render inline with every other A01 finding under the unified severity scheme. The Table Permissions tab in that case becomes a deep-link back to `docs/permissions-audit.html`. For every other framework (CWE, ASVS, SCA, license, bring-your-own), the findings do not map cleanly into those frameworks' categories, so the standalone Table Permissions tab renders with the 4-stat grid and the "Full evidence: docs/permissions-audit.html" link at the top.
+4. **Do not** re-render the full permission-audit findings inline — the original report is the deep-dive; the unified report shows the merged / standalone summary.
 5. **Preserve delegation** — remediation of a permission finding in Phase 6 invokes `/audit-permissions`, which in turn delegates fixes to the `table-permissions-architect` agent. The meta-skill does not write permission YAML directly.
 
 ## Posture snapshot — what each read returns
@@ -188,7 +199,7 @@ Per the plugin's established pattern, the meta-skill must integrate with — not
 | `scan.score` | `skills/security-scan/scripts/scan.js --score` | `{ totalRules, succeededRules }` from the latest completed scan |
 | `headers.audit` | `skills/security-headers/scripts/security-headers.js --audit --projectRoot <root>` | Present / missing / forbidden HTTP/* site-settings |
 | `languages` | `skills/code-analysis/scripts/detect-languages.js --projectRoot <root>` | Which CodeQL-supported languages are in the project |
-| `webRoles` | Inline file read of `<projectRoot>/.powerpages-site/web-roles/*.webrole.yml` via the plugin-shared `powerpages-config` loader (no child process, no network) | `{ present, count, roles[] }` or `{ error }`. Absence or an empty set on a `SiteVisibility === 'Private'` site is flagged A01 (High) in Phase 4; presence on a Public site that owns admin-looking pages is flagged A01 (Medium) with a recommendation to bind the role via `/create-webroles`. |
+| `webRoles` | Inline file read of `<projectRoot>/.powerpages-site/web-roles/*.webrole.yml` via the plugin-shared `powerpages-config` loader (no child process, no network) | `{ present, count, roles[] }` or `{ error }`. On a Public site with admin-looking pages but unbound web roles, Phase 4 raises A01 (Medium) with a recommendation to bind the role via `/create-webroles`. |
 
 The script fails open — if any individual read fails, its field is populated as `{ "error": "<message>" }` and the others still proceed. The meta-skill surfaces any failed reads in the report so the user sees what information is missing.
 

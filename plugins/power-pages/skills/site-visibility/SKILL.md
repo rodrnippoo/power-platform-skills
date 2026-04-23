@@ -4,11 +4,7 @@ description: >-
   Flips a Power Pages site between Public and Private. Use when the user
   mentions site visibility, making a site internal-only, publishing a
   site to the internet, or diagnosing why a visibility flip was refused
-  — even if they do not use the exact phrase "site visibility". Out of
-  scope: who can sign in to a Private site (that per-site allow-list is
-  managed outside this skill), anonymous-access DLP, IP allow-lists,
-  and governance policies — those belong to other skills or admin
-  tooling and must not route here.
+  — even if they do not use the exact phrase "site visibility".
 user-invocable: true
 argument-hint: "[optional: Public or Private]"
 allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
@@ -19,9 +15,7 @@ model: opus
 
 # Site Visibility
 
-Flip a Power Pages site between Public and Private. The apply is one command call behind a user approval — no batch, no silent changes. Deploy mechanics are owned by `/deploy-site`; here, the apply is the command call itself.
-
-Who can sign in to a Private site is a separate per-site allow-list managed from the Power Pages Studio interface — this skill does not touch it. If the user asks how to restrict Private-site viewers, point them at that interface.
+Flip a Power Pages site between Public and Private. The apply is one command call behind a user approval — no batch, no silent changes.
 
 ## When to load which reference
 
@@ -35,10 +29,9 @@ Who can sign in to a Private site is a separate per-site allow-list managed from
 - A `null` from the resolver is not a dead-end — it means either the site has not been deployed, or the PAC auth profile is pointing at a different environment than the one that owns the site. Ask the user which applies before recovering.
 - Flipping visibility restarts the site. Expect up to a few minutes of propagation delay before the new state is reflected in the website record — do not treat an immediate "unchanged" read as a failure.
 - A Private site depends on Entra authentication being enabled. If the user plans to disable Entra auth on the site, flip to Public first — otherwise sign-in breaks on the Private site.
-- Developer sites cannot be made Public — `D005` is an absolute block. **Even a tenant admin cannot override it.** Stop and tell the user the only path is a site in a non-developer environment.
-- Trial and other non-production sites can be blocked from Public by tenant governance policy — `A039` is conditional, not absolute. A tenant admin can adjust the governance policy to allow the flip. If the caller is not a tenant admin, surface the message and stop.
-- `A037` means the caller is not authorized to flip visibility. Ask a tenant admin to perform the flip.
-- Non-production lock-in: once a non-production site is flipped to Private, the tenant governance policy may prevent flipping back to Public. Warn the user before the Public → Private flip if the site is non-production.
+- Developer sites cannot be made Public — `D005` is an absolute block. Stop and tell the user the only path is a site in a non-developer environment.
+- Trial and other non-production sites can be blocked from Public by tenant governance policy — `A039`. Surface the message and stop.
+- `A037` means the caller is not authorized to flip visibility.
 
 ## Workflow
 
@@ -59,7 +52,7 @@ At the start of Phase 1, create one task per phase with `TaskCreate`. Mark `in_p
 
 ### Phase 2 — Read current visibility
 
-From the website record fetched in Phase 1, read the `SiteVisibility` field. Value is `Public` or `Private`.
+From the website record fetched in Phase 1, read the `siteVisibility` field. Value is `public` or `private`.
 
 State the current visibility back to the user in one sentence before continuing.
 
@@ -93,11 +86,11 @@ Get explicit approval covering each relevant disclosure before calling the comma
 Branch on the command's exit code. The full table lives in `references/commands.md`; the ones to handle here:
 
 - Exit `3` (`A001`, portal not found): re-resolve portal id via `website.js` or ask the user to confirm the site is deployed in the current environment.
-- Exit `4` (`A037`, not authorized): ask a tenant admin to perform the flip.
-- Exit `5` (`A039`, trial / non-production blocked by governance): a tenant admin can adjust the governance policy to allow the flip; if the user is not a tenant admin, stop.
-- Exit `6` (`D005`, developer site): cannot be made Public. Even a tenant admin cannot override this. Stop.
+- Exit `4` (`A037`, not authorized): stop and surface the message. — the caller cannot work around this.
+- Exit `5` (`A039`, non-production site blocked from Public by governance): stop and surface the message.
+- Exit `6` (`D005`, developer site): visibility cannot be changed to Public on a developer environment. Stop.
 - Exit `2` (invalid arguments): re-read `references/commands.md`, correct the flag, retry.
-- Exit `1` (unknown / transport): show the stderr message verbatim to the user and stop.
+- Exit `1` (unknown / transport / uncategorised service code): show the stderr message verbatim to the user and stop. If the message carries a code such as `A010` (null/empty portal id or bad value), `A019` (portal id not a GUID), `A033` (caller's token is for a different tenant than the resolved environment), or `A009` (server-side failure), name the condition when relaying so the user can self-correct.
 
 Do not retry on exit codes `4`, `5`, or `6` — those are state refusals, not transient failures.
 
@@ -105,7 +98,7 @@ Do not retry on exit codes `4`, `5`, or `6` — those are state refusals, not tr
 
 Wait 60 seconds before re-checking. The flip restarts the site and propagation typically takes a few minutes to reflect in the website record — re-reading immediately gives a false "unchanged" result.
 
-Then re-run the resolver from Phase 1 and read the `SiteVisibility` field. Confirm it matches the target.
+Then re-run the resolver from Phase 1 and read the `siteVisibility` field. Confirm it matches the target.
 
 If the value has not updated, poll with wait-and-retry:
 

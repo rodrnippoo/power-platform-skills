@@ -93,7 +93,7 @@ const HTML_TAG_TO_DIRECTIVE = Object.freeze({
   video: 'media-src',
   audio: 'media-src',
   source: 'media-src',
-  embed: 'img-src', // CSP doesn't have an 'embed' bucket; nearest match
+  embed: 'object-src', // CSP Level 3 pairs <embed> with object-src alongside <object>/<applet>
   form: 'form-action',
   // <link> is special — categorized by rel attribute below
 });
@@ -124,6 +124,7 @@ Output (stdout):
       "connect-src": ["<host>", ...],
       "frame-src":   ["<host>", ...],
       "media-src":   ["<host>", ...],
+      "object-src":  ["<host>", ...],
       "form-action": ["<host>", ...]
     },
     "runtimeDependencies": { "<directive>": [<sources>], ... },
