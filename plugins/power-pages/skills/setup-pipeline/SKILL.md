@@ -245,15 +245,25 @@ Extract:
 
 On failure: the script writes the error to stderr and exits 1 — stop and report the error to the user.
 
-### Phase 6b — Multi-solution loop (only if `MULTI_SOLUTION_MODE = true`)
+### Phase 6b — Multi-solution deploymentOrder (only if `MULTI_SOLUTION_MODE = true`)
 
-When the manifest is `schemaVersion: 2`, repeat the pipeline-creation flow for **each entry** in `SOLUTIONS_LIST`:
+> **Design note (updated v1.3.x):** A single Power Platform Pipeline can deploy
+> multiple solutions through separate stage runs — each run just specifies a
+> different `artifactname` + `solutionid` on the same `deploymentstages` record.
+> Creating one pipeline per solution was wasteful and cluttered the Pipelines
+> UI. **We now create ONE pipeline + one stage per target env, and record the
+> per-solution deployment order in `.last-pipeline.json`**. `deploy-pipeline`
+> then loops over the order, creating a stage run per solution against the same
+> stage.
 
-1. Derive `pipelineName = "{solution.uniqueName}-Pipeline"` (e.g. `IdeaSphere_Core-Pipeline`).
-2. Re-use the same `HOST_ENV_URL`, `SOURCE_DEPLOYMENT_ENV_ID`, and `TARGET_DEPLOYMENT_ENV_IDS` across all pipelines. Only the pipeline record + its stage records are created per solution — the deployment environments are shared.
-3. Iterate `SOLUTIONS_LIST` **in `order`** so lower-order solutions get their pipelines first.
-4. Collect each created pipelineId into `PIPELINES[]`.
-5. When writing `.last-pipeline.json` in Phase 7, include `pipelines[]` with one entry per solution (see below).
+When the manifest is `schemaVersion: 2`, do **not** call `create-deployment-pipeline.js` multiple times. Instead:
+
+1. Call `create-deployment-pipeline.js` **once** with:
+   - `pipelineName = "{siteName}-Pipeline"` (e.g. `IdeaSphere-Pipeline`).
+   - `description` listing the solutions that will deploy through it (e.g. `"Deploys IdeaSphere_Core → IdeaSphere_WebAssets → IdeaSphere_Future in order"`).
+   - One `deploymentstages` record per target environment (not per solution).
+2. Build the `deploymentOrder` array from `SOLUTIONS_LIST` sorted by `order`. Each entry has `{ solutionUniqueName, solutionId, order }`. Skip entries where `isFutureBuffer: true` AND `components.length === 0` — an empty Future solution has nothing to deploy; it's created by `setup-solution` but does not participate in the deployment loop until it has content. Keep it in the order array with `status: "skipped-empty"` so the renderer can show the intent.
+3. Collect the single `pipelineId` and its `stages[]`. Persist `deploymentOrder` to `.last-pipeline.json` (see Phase 7).
 
 ### Phase 7 — Verify, Write Artifacts, Commit
 
@@ -288,32 +298,35 @@ Confirm `statecode = 0` (Active). If the query fails, report as "verification in
 }
 ```
 
-**Multi-solution marker (manifest v2):** When `MULTI_SOLUTION_MODE = true`, `.last-pipeline.json` uses `schemaVersion: 2` with a `pipelines[]` array:
+**Multi-solution marker (manifest v2):** When `MULTI_SOLUTION_MODE = true`, `.last-pipeline.json` uses `schemaVersion: 3` with a **single** pipeline and a `deploymentOrder[]` describing which solutions deploy through it, in what order:
+
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "pipelineId": "...",
+  "pipelineName": "IdeaSphere-Pipeline",
   "hostEnvUrl": "{HOST_ENV_URL}",
   "sourceDeploymentEnvironmentId": "{SOURCE_DEPLOYMENT_ENV_ID}",
   "sourceEnvironmentUrl": "{devEnvUrl}",
   "createdAt": "{ISO timestamp}",
-  "pipelines": [
+  "stages": [
     {
-      "pipelineId": "...",
-      "pipelineName": "IdeaSphere_Core-Pipeline",
-      "solutionName": "IdeaSphere_Core",
-      "order": 1,
-      "stages": [ /* same shape as v1 stages[] */ ]
-    },
-    {
-      "pipelineId": "...",
-      "pipelineName": "IdeaSphere_WebAssets-Pipeline",
-      "solutionName": "IdeaSphere_WebAssets",
-      "order": 2,
-      "stages": [ /* ... */ ]
+      "stageId": "...",
+      "name": "Deploy to Staging",
+      "rank": 1,
+      "targetDeploymentEnvironmentId": "...",
+      "targetEnvironmentUrl": "https://staging.crm.dynamics.com"
     }
+  ],
+  "deploymentOrder": [
+    { "solutionUniqueName": "IdeaSphere_Core", "solutionId": "...", "order": 1 },
+    { "solutionUniqueName": "IdeaSphere_WebAssets", "solutionId": "...", "order": 2 },
+    { "solutionUniqueName": "IdeaSphere_Future", "solutionId": "...", "order": 3, "status": "skipped-empty", "isFutureBuffer": true }
   ]
 }
 ```
+
+> **Migration note:** Earlier versions of this skill used `schemaVersion: 2` with a `pipelines[]` array (one Dataverse pipeline record per solution). Projects pinned to v2 continue to work with the old `deploy-pipeline` MULTI_PIPELINE_MODE path; the v3 format should be used for all new setups. When re-running `setup-pipeline` on a v2 project, ask via `AskUserQuestion` whether to migrate (delete the N-1 extra pipelines and collapse to a single one) or keep the legacy layout.
 
 **7.3 Write `docs/pipeline-setup.md`** (create `docs/` directory if needed):
 

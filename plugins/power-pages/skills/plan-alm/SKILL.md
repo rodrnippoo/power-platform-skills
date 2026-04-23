@@ -164,6 +164,47 @@ Steps:
     Asset advisory: {K} files flagged for Azure Blob externalization.
     ```
 
+11. **Pre-plan completeness check** (only runs when `SOLUTION_DONE = true`).
+
+    Before the user approves a plan, verify the existing solution already covers everything on the live site. Components created after the last `/power-pages:setup-solution` run (server logic from `add-server-logic`, flows from `add-cloud-flow`, env vars from `configure-env-variables` or `setup-auth`) are silently excluded from any plan built on top of a stale solution.
+
+    Run the shared discovery helper against the source environment:
+
+    ```bash
+    node "${CLAUDE_PLUGIN_ROOT}/scripts/lib/discover-site-components.js" \
+      --envUrl "{envUrl}" --token "{token}" \
+      --siteId "{websiteRecordId from powerpages.config.json}" \
+      --publisherPrefix "{solutionManifest.publisher.prefix}" \
+      --solutionId "{solutionManifest.solution.solutionId}"
+    ```
+
+    Parse stdout and evaluate `missing.*`:
+
+    - **All `missing.*` arrays empty** → report "Solution contents match the site — proceeding with fresh plan inputs." Continue to Phase 2.
+    - **Any non-empty `missing.*` array** → report a compact summary:
+      > "Your solution is **missing {N} component(s)** that exist on the site:
+      >
+      > - **{X}** site components (e.g. {first 3 names})
+      > - **{Y}** cloud flows
+      > - **{Z}** environment variable definitions
+      > - **{W}** custom tables
+      >
+      > A plan built now will ignore these components. How would you like to proceed?"
+
+      Ask via `AskUserQuestion`:
+
+      | Question | Header | Options |
+      |---|---|---|
+      | Run `/power-pages:setup-solution` in sync mode to adopt the missing components before planning? | Completeness Check | Yes — sync first (Recommended), No — plan with current solution contents, Cancel |
+
+      - **Yes, sync first (Recommended)**: invoke `/power-pages:setup-solution` (auto-detects the existing manifest and enters sync mode). After it completes, re-run the discovery helper; if `missing.*` is now empty proceed to Phase 2, otherwise repeat the prompt.
+      - **No, plan with current contents**: store the gap summary as `KNOWN_GAPS` so Phase 3 can surface it in the plan HTML's Risks section, then continue.
+      - **Cancel**: stop the skill so the user can investigate.
+
+    > **Why this exists**: the same check runs at export (`export-solution` Phase 2.5) and deploy (`deploy-pipeline` Phase 3.5). Adding it here catches gaps at the earliest possible gate — before the user invests time reviewing a plan built on stale inputs. See AGENTS.md → ALM-aware by default.
+
+    > **Skip when `SOLUTION_DONE = false`**: if there is no manifest yet, there is nothing to be stale against — Phase 2 Q1 will handle first-time solution setup.
+
 ---
 
 ## Phase 2 — Gather ALM Strategy
@@ -447,6 +488,7 @@ Populate `risks` based on gathered data:
 - If `GIT_STATUS = "no"`: `{ type: "info", message: "Consider enabling source control to track changes before deploying to production." }`
 - If `EXPORT_TYPE = "unmanaged"` and strategy includes a production target: `{ type: "warning", message: "Unmanaged solutions can be edited in the target environment — consider using Managed for production." }`
 - If `SOLUTION_DONE = false`: `{ type: "info", message: "A Dataverse solution will be created first — publisher prefix is irreversible once chosen." }`
+- If `KNOWN_GAPS` is set (the pre-plan completeness check in Phase 1 Step 11 found gaps and the user chose to continue): `{ type: "warning", message: "{X} site components, {Y} cloud flows, {Z} env vars, and {W} custom tables exist on the site but are not in the current solution. This plan will not promote them — run /power-pages:setup-solution sync mode before deploying, or re-run plan-alm after syncing." }`. Substitute the counts from `KNOWN_GAPS.missing.*.length`.
 
 Write `planData` to `docs/.alm-plan-data.json` (create `docs/` if it doesn't exist).
 

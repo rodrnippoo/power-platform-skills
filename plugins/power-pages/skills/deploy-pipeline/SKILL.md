@@ -79,10 +79,13 @@ Steps:
 3. Locate `.last-pipeline.json` in the project root — if not found, stop and advise running `/power-pages:setup-pipeline` first.
 
    **Manifest version check:**
-   - If `schemaVersion === 2`, set `MULTI_PIPELINE_MODE = true` and store `pipelines[]` as `PIPELINES_LIST`. The skill will deploy all pipelines for the selected target stage, in `order`, one after the other (Core → WebAssets, etc.). A failure on any pipeline halts the chain for that stage.
-   - Otherwise read `pipelineId`, `pipelineName`, `hostEnvUrl`, `sourceDeploymentEnvironmentId`, `solutionName`, `stages[]` (single-pipeline mode — existing behavior).
+   - If `schemaVersion === 3`, set `MULTI_RUN_MODE = true` and store `deploymentOrder[]` as `DEPLOYMENT_ORDER`. There is a **single pipeline** with a single set of stages; multi-solution is expressed via N stage runs against the same stage, one per solution in `order`. This is the current recommended layout.
+   - If `schemaVersion === 2` (legacy), set `MULTI_PIPELINE_MODE = true` and store `pipelines[]` as `PIPELINES_LIST`. The skill falls back to the older "loop over N separate `deploymentpipelines` records" behavior. Advise the user to re-run `setup-pipeline` to migrate to v3.
+   - Otherwise read `pipelineId`, `pipelineName`, `hostEnvUrl`, `sourceDeploymentEnvironmentId`, `solutionName`, `stages[]` (single-solution mode — existing behavior).
 
-   **In `MULTI_PIPELINE_MODE`**, resolve `solutionName` per pipeline in the loop (not globally). All pipelines share the same `hostEnvUrl` and `sourceDeploymentEnvironmentId`.
+   **In `MULTI_RUN_MODE`**, resolve `solutionName` + `solutionId` per iteration of `DEPLOYMENT_ORDER`. Entries where `status === "skipped-empty"` (typically the `{Prefix}_Future` buffer) are short-circuited — no stage run is created for them. The single `pipelineId` / `hostEnvUrl` / `sourceDeploymentEnvironmentId` apply to every run.
+
+   **In `MULTI_PIPELINE_MODE`** (legacy v2), resolve `solutionName` per pipeline in the loop (not globally). All pipelines share the same `hostEnvUrl` and `sourceDeploymentEnvironmentId`.
 
 4. Acquire host environment token:
    ```bash
@@ -107,12 +110,17 @@ Otherwise, ask via `AskUserQuestion`:
 
 Store selected stage as `SELECTED_STAGE` (with `stageId`, `name`, `targetDeploymentEnvironmentId`, `targetEnvironmentUrl`).
 
-**In `MULTI_PIPELINE_MODE`:** The selected stage label (e.g., "Staging") is matched against each pipeline's `stages[]` — each pipeline has its own `stageId` for the same target environment. All subsequent phases (validate, deploy, poll) are looped over `PIPELINES_LIST` in `order`:
+**In `MULTI_RUN_MODE` (v3 — recommended):** The selected stage is looked up once from the single `stages[]` array. The skill then **loops over `DEPLOYMENT_ORDER`** in `order`, creating one stage run per solution against the same `stageId`:
+1. For each entry in `DEPLOYMENT_ORDER` where `status !== "skipped-empty"`: resolve its `solutionUniqueName` + `solutionId`, set `ARTIFACT_SOLUTION_NAME` / `ARTIFACT_SOLUTION_ID`, then run Phases 3–6 (resolve info → validate → configure → deploy → poll) against the same pipeline.
+2. If any iteration fails (validation or deployment), halt the loop and report **which solution** failed and which had already landed.
+3. Write one `.last-deploy.json` at the end summarizing all runs for the selected stage. Record per-solution `status` (`Succeeded` / `Failed` / `NotAttempted` / `SkippedEmpty`) plus the shared `pipelineId`.
+
+**In `MULTI_PIPELINE_MODE` (v2 — legacy):** The selected stage label (e.g., "Staging") is matched against each pipeline's `stages[]` — each pipeline has its own `stageId` for the same target environment. All subsequent phases (validate, deploy, poll) are looped over `PIPELINES_LIST` in `order`:
 1. Loop iteration i: use `pipelines[i].stageId` where stage label matches `SELECTED_STAGE.name`, `pipelines[i].solutionName`, etc.
 2. If any iteration fails (validation or deployment), halt the loop and report which pipeline failed and which were already deployed.
 3. Write one `.last-deploy.json` at the end summarizing all pipeline runs for this stage. Record per-pipeline `status` (`Succeeded` / `Failed` / `NotAttempted`) so a retry can tell which ones still need to run.
 
-> **Partial-deploy risk.** When the loop halts (e.g., `Core` succeeded, `WebAssets` failed), the target environment is left in a mixed state — there is no automatic rollback of solutions that already imported. The per-pipeline `status` in `.last-deploy.json` is the source of truth for what landed. When the user re-runs `deploy-pipeline` after fixing the failure, the loop iterates all pipelines again from the start; rely on the solution-import idempotency (same version = no-op) rather than skipping. Warn the user of this before starting a multi-pipeline deploy to production.
+> **Partial-deploy risk.** When the loop halts (e.g., `Core` succeeded, `WebAssets` failed), the target environment is left in a mixed state — there is no automatic rollback of solutions that already imported. The per-solution (v3) or per-pipeline (v2) `status` in `.last-deploy.json` is the source of truth for what landed. When the user re-runs `deploy-pipeline` after fixing the failure, the loop iterates all entries again from the start; rely on the solution-import idempotency (same version = no-op) rather than skipping. Warn the user of this before starting a multi-solution deploy to production.
 
 Check `.last-deploy.json` — if the last deployment to this stage failed, warn the user:
 > "The last deployment to `{stageName}` had status: **Failed**. Would you like to retry? 1. Yes, retry / 2. No, cancel"
@@ -594,15 +602,17 @@ Then resume polling from Phase 6.2.
 
 If **Exit**: stop and present the failure summary above.
 
-**7.7 Check site activation** (only if deployment **Succeeded** and solution has Power Pages components):
+**7.7 Check site activation** (only if deployment **Succeeded** and this is a Power Pages project):
 
-Query the source environment to check whether the solution contains a website component (componentType `10374`):
+> **Trigger rule (updated 2026-04-22):** run this check whenever the source project's `powerpages.config.json` has a `websiteRecordId` — i.e. this project is a Power Pages site project. The earlier rule ("only if the solution we just deployed contains a website componentType 10374") misses a real-world case: the site may pre-exist on the target and the solution we deployed may only contain tables/flows/bots. A Power Pages project's post-deploy is always incomplete if its site isn't activated on the target, regardless of which specific solution was shipped this time.
+
+Read `websiteRecordId` from `powerpages.config.json`. If the field is absent, skip the rest of 7.7 (this is a non-Power-Pages ALM run — e.g. a pure data-model solution).
+
+Optional secondary check: query the source solution for a website componentType `10374` only to **log** whether the site was included in this specific solution — informational, not gating:
 ```
 GET {sourceEnvUrl}/api/data/v9.2/solutioncomponents?$filter=_solutionid_value eq '{solutionId}' and componenttype eq 10374&$select=objectid
 Authorization: Bearer {SOURCE_TOKEN}
 ```
-
-If no results, skip the rest of 7.7.
 
 If found, temporarily switch PAC CLI to the target environment so `check-activation-status.js` queries the correct env:
 ```bash

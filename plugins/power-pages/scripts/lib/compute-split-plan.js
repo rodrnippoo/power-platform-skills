@@ -47,9 +47,9 @@ function buildSizeAnalysis(estimate, thresholds) {
       tier: classifyTier(estimate.totalSizeMB, 60, thresholds.maxSolutionSizeMB),
     },
     componentCount: {
-      value: estimate.componentCount,
+      value: estimate.componentCountSiteTotal,
       tier: classifyTier(
-        estimate.componentCount,
+        estimate.componentCountSiteTotal,
         thresholds.warnComponentCount,
         thresholds.maxComponentCount,
       ),
@@ -174,7 +174,7 @@ function selectStrategy(estimate, config) {
   // Hard-flag counts still route to Strategy 2 — a split is the best option we have. The
   // hard-flag warning is added separately in buildRecommendations.
   const isComponentHeavy =
-    estimate.componentCount > t.maxComponentCount ||
+    estimate.componentCountSiteTotal > t.maxComponentCount ||
     (estimate.cloudFlowCount > t.changeFreqMinFlows && estimate.totalSizeMB > t.changeFreqMinSizeMB);
   const hasManyEnvVars = estimate.envVarCount > t.maxEnvVarCount;
 
@@ -201,7 +201,7 @@ function partitionBySingle(estimate, meta) {
       description:
         'All components packaged in a single managed solution. Estimated size is within recommended thresholds.',
       sizeMB: estimate.totalSizeMB,
-      componentCount: estimate.componentCount,
+      componentCount: estimate.componentCountSiteTotal,
       components: [],
     },
   ];
@@ -209,7 +209,7 @@ function partitionBySingle(estimate, meta) {
 
 function partitionByLayer(estimate, meta) {
   const coreSize = Math.max(estimate.totalSizeMB - estimate.webFilesAggregateMB, 0);
-  const coreCount = Math.max(estimate.componentCount - (estimate.webFileCount || 0), 0);
+  const coreCount = Math.max(estimate.componentCountSiteTotal - (estimate.webFileCount || 0), 0);
   return [
     {
       uniqueName: `${meta.baseName}_Core`,
@@ -237,11 +237,11 @@ function partitionByLayer(estimate, meta) {
 }
 
 function partitionByChangeFrequency(estimate, meta) {
-  const foundationCount = Math.ceil(estimate.componentCount * 0.15);
+  const foundationCount = Math.ceil(estimate.componentCountSiteTotal * 0.15);
   const integrationCount = estimate.cloudFlowCount + estimate.botCount;
-  const configCount = Math.ceil(estimate.componentCount * 0.1);
+  const configCount = Math.ceil(estimate.componentCountSiteTotal * 0.1);
   const contentCount = Math.max(
-    estimate.componentCount - foundationCount - integrationCount - configCount,
+    estimate.componentCountSiteTotal - foundationCount - integrationCount - configCount,
     0,
   );
 
@@ -336,7 +336,7 @@ function partitionBySchema(estimate, meta, config) {
       'Site artifacts — web roles, permissions, settings, flows, pages. Imports after all domain solutions.',
     sizeMB: round(siteSizeMB),
     componentCount: Math.max(
-      estimate.componentCount - domainSolutions.reduce((s, d) => s + d.componentCount, 0),
+      estimate.componentCountSiteTotal - domainSolutions.reduce((s, d) => s + d.componentCount, 0),
       0,
     ),
     components: [],
@@ -386,6 +386,39 @@ function sanitizeDomainName(name) {
   return String(name).replace(/[^A-Za-z0-9]/g, '');
 }
 
+/**
+ * Appends an empty "Future Growth" solution to a multi-solution split so there
+ * is an obvious default target for any new components the team adds later. Without
+ * this buffer, every new server-logic / flow / env var tends to end up crammed
+ * into the wrong layer solution and forces a re-plan.
+ *
+ * Rules:
+ *   - Only appended when the split already has ≥ 2 solutions (splits, not `single`).
+ *   - Sized at 0 MB / 0 components — it's a reserved slot, not a prediction.
+ *   - Marked with `isFutureBuffer: true` so renderers and setup-solution can
+ *     style/describe it distinctly from partition-owned solutions.
+ *   - Tagged with `componentTypes: ['Any']` to signal "open to any type."
+ */
+function appendFutureBuffer(solutions, meta) {
+  if (!Array.isArray(solutions) || solutions.length < 2) return solutions;
+  const nextOrder = (solutions[solutions.length - 1].order || solutions.length) + 1;
+  return [
+    ...solutions,
+    {
+      uniqueName: `${meta.baseName}_Future`,
+      displayName: `${meta.siteName} — Future Growth`,
+      order: nextOrder,
+      componentTypes: ['Any'],
+      description:
+        'Reserved empty solution. New components added to the site after this plan (server logic, cloud flows, env vars, pages, etc.) should be added here by default so the partition-owned solutions above stay stable. Rename it or fold it into an existing solution if site growth plateaus.',
+      sizeMB: 0,
+      componentCount: 0,
+      components: [],
+      isFutureBuffer: true,
+    },
+  ];
+}
+
 function round(n) {
   return Math.round((Number(n) || 0) * 10) / 10;
 }
@@ -420,11 +453,11 @@ function buildRecommendations(estimate, strategy, config) {
         'Schema-heavy solution detected. Expected import time per stage: 2–10+ hours. Test in staging first and do not schedule production deploys during peak hours.',
     });
   }
-  if (estimate.componentCount > t.hardFlagComponentCount) {
+  if (estimate.componentCountSiteTotal > t.hardFlagComponentCount) {
     recs.push({
       type: 'error',
       message:
-        `Component count (${estimate.componentCount.toLocaleString()}) exceeds the hard-flag threshold of ${t.hardFlagComponentCount.toLocaleString()}. Splitting alone is unlikely to be sufficient — archive historical data, remove unused components, or consolidate before proceeding.`,
+        `Component count (${estimate.componentCountSiteTotal.toLocaleString()}) exceeds the hard-flag threshold of ${t.hardFlagComponentCount.toLocaleString()}. Splitting alone is unlikely to be sufficient — archive historical data, remove unused components, or consolidate before proceeding.`,
     });
   }
   if (estimate.totalSizeMB > t.maxSolutionSizeMB) {
@@ -483,6 +516,11 @@ function computeSplitPlan({ estimate, config, meta }) {
     proposedSolutions = applyConfigIsolation(proposedSolutions, estimate, meta);
   }
 
+  // Add a reserved `{Prefix}_Future` solution when the site is actually being
+  // split so new components have a defined home. Single-solution plans skip
+  // this — there's no split to protect.
+  proposedSolutions = appendFutureBuffer(proposedSolutions, meta);
+
   const splitWarnings = validateSplits(proposedSolutions, config.thresholds);
   const recommendations = buildRecommendations(estimate, strategy, config).concat(splitWarnings);
 
@@ -538,6 +576,7 @@ module.exports = {
   partitionByChangeFrequency,
   partitionBySchema,
   applyConfigIsolation,
+  appendFutureBuffer,
   validateSplits,
   buildRecommendations,
 };

@@ -61,7 +61,24 @@ const assetAdvisory = data.assetAdvisory || { enabled: false, candidates: [], re
 const breakdown = data.breakdown || {};
 
 const totalSizeMB = Number(sizeAnalysis?.totalSizeMB?.value ?? 0);
-const componentCount = Number(sizeAnalysis?.componentCount?.value ?? 0);
+// Three-number semantics when the estimator ran with --solutionId:
+//   componentCountSiteTotal      — RAW Dataverse rows on the site. What the
+//                                  Maker UI would show if the entire site
+//                                  were adopted into a solution.
+//   componentCountInSolution     — solutioncomponents rows for the target
+//                                  solution. Matches the Maker "Objects" count.
+//   orphansOnSite                — ppcs on the site that aren't in the solution,
+//                                  excluding stale bundle chunks.
+// For the headline "X components" we prefer inSolution when present (that's
+// what the pipeline ships). Fall back to siteTotal or the legacy
+// sizeAnalysis.componentCount value when the estimator ran without a solution
+// context.
+const fallbackComponentCount = Number(sizeAnalysis?.componentCount?.value ?? 0);
+const componentCountSiteTotal = Number(data.componentCountSiteTotal ?? fallbackComponentCount);
+const componentCountInSolution = (data.componentCountInSolution == null) ? null : Number(data.componentCountInSolution);
+const orphansOnSite = (data.orphansOnSite == null) ? null : Number(data.orphansOnSite);
+const hasSolutionMembershipBreakout = componentCountInSolution !== null;
+const componentCount = hasSolutionMembershipBreakout ? componentCountInSolution : componentCountSiteTotal;
 const SIZE_LIMIT_MB = 95;
 const exceedsSize = totalSizeMB > SIZE_LIMIT_MB;
 const sizeTier = sizeAnalysis?.totalSizeMB?.tier || 'unknown';
@@ -291,12 +308,53 @@ function buildSolutionsTabDesc() {
     : 'All components packaged in a single managed solution.';
 }
 
+function buildAssetAdvisoryCallout() {
+  // Surface the advisory on the Solutions tab when the primary recommendation
+  // is to move assets out of the solution. Without this pointer, users only
+  // see "N proposed solutions" and miss the fact that a CDN/Blob move would
+  // likely avoid the split altogether.
+  if (!assetAdvisory.enabled) return '';
+  if (assetAdvisory.recommendation !== 'externalize-media') return '';
+  const candidateCount = Array.isArray(assetAdvisory.candidates) ? assetAdvisory.candidates.length : 0;
+  const candidateMB = Array.isArray(assetAdvisory.candidates)
+    ? assetAdvisory.candidates.reduce((s, c) => s + Number(c.sizeMB || 0), 0).toFixed(1)
+    : '0.0';
+  return `<div class="warning-box" style="margin-bottom:16px;">
+  <span style="font-size:18px;">&#9888;</span>
+  <div>
+    <strong>A split may not be necessary.</strong>
+    ${escapeHtml(String(candidateCount))} large asset(s) totalling ${escapeHtml(candidateMB)} MB could be moved to Azure Blob or a CDN instead of packaged into solutions.
+    Externalizing them typically lets the site stay in a single solution — review the full list on the
+    <a href="#" class="solutions-to-advisory" onclick="const b=document.querySelector('.nav-btn[data-tab=&quot;advisory&quot;]');if(b){b.click();window.scrollTo(0,0);}return false;">Asset Advisory tab</a>
+    before committing to the split below.
+  </div>
+</div>`;
+}
+
+function buildSolutionMembershipBanner() {
+  // When the estimator had a --solutionId context, show the site-vs-solution
+  // split so reviewers can reconcile what they see in the Maker UI with what
+  // ships. Numbers are all raw row counts — bundle chunks included — so they
+  // match the "Objects" page in Power Platform's solution explorer.
+  if (!hasSolutionMembershipBreakout) return '';
+  const orphansClass = (orphansOnSite && orphansOnSite > 0) ? 'warn' : 'pass';
+  const orphansNote = (orphansOnSite && orphansOnSite > 0)
+    ? ` · ${orphansOnSite.toLocaleString()} actionable orphan(s) on the site are NOT in this solution — run <code>/power-pages:setup-solution</code> in sync mode to adopt them. (Stale bundle-chunk orphans are excluded from this count.)`
+    : ` · solution is fully in sync with the site (no actionable orphans).`;
+  return `<div class="note-box ${orphansClass}" style="margin-bottom:16px;">
+  <strong>Solution membership vs. site inventory.</strong>
+  The site holds <strong>${componentCountSiteTotal.toLocaleString()}</strong> raw rows in Dataverse; the target solution owns <strong>${componentCountInSolution.toLocaleString()}</strong> components.${orphansNote}
+</div>`;
+}
+
 function buildSolutionsHtml() {
   if (proposedSolutions.length === 0) {
     return '<div class="note-box neutral">Solution structure will be determined during Setup Solution.</div>';
   }
+  const membershipHtml = buildSolutionMembershipBanner();
+  const calloutHtml = buildAssetAdvisoryCallout();
   const colors = ['#0078d4', '#ca5010', '#107c10', '#8764b8', '#038387', '#5c2d91'];
-  return proposedSolutions.map((sol, i) => {
+  const cards = proposedSolutions.map((sol, i) => {
     const color = colors[i % colors.length];
     const overLimit = sol.sizeMB > SIZE_LIMIT_MB;
     const sColor = overLimit ? 'var(--high)' : 'var(--pass)';
@@ -327,41 +385,60 @@ function buildSolutionsHtml() {
   </div>
 </div>`;
   }).join('\n');
+  return `${membershipHtml}${calloutHtml}${cards}`;
 }
 
-function buildPipelinesTabTitle() { return proposedSolutions.length > 1 ? `Deployment Pipelines (${proposedSolutions.length})` : 'Deployment Pipeline'; }
+function buildPipelinesTabTitle() {
+  // We always provision a single pipeline now, even in multi-solution plans —
+  // multi-solution is expressed via deploymentOrder against the same pipeline.
+  return 'Deployment Pipeline';
+}
 function buildPipelinesTabDesc() {
+  const nDeployable = proposedSolutions.filter((s) => !s.isFutureBuffer).length;
   return proposedSolutions.length > 1
-    ? 'One pipeline per solution, deployed in dependency order. All pipelines share the same deployment environments.'
+    ? `One Power Platform Pipeline runs ${nDeployable} solution${nDeployable === 1 ? '' : 's'} in dependency order against each target environment. The empty Future solution is created but skipped during deployment until it has content.`
     : `Power Platform Pipelines configuration for promoting ${escapeHtml(data.SITE_NAME)} across environments.`;
 }
 
 function buildPipelinesHtml() {
   const colors = ['#0078d4', '#ca5010', '#107c10', '#8764b8', '#038387'];
   const stages = Array.isArray(data.stages) ? data.stages : [];
+  const stagesHtml = stages.map((st) => `<div class="pipeline-stage ${st.type === 'source' ? 'stage-active' : ''}">
+    <div class="stage-name">${escapeHtml(st.label || '')}</div>
+    <div class="stage-env">${escapeHtml(st.envUrl || '')}</div>
+  </div>`).join('');
 
   if (proposedSolutions.length > 1) {
-    return proposedSolutions.map((sol, i) => {
-      const color = colors[i % colors.length];
-      return `<div class="pipeline-solution-label">
-  <span class="pipeline-solution-dot" style="background:${color};"></span>
-  <span class="pipeline-solution-name">${escapeHtml(sol.uniqueName)}-Pipeline</span>
-  <span style="margin-left:auto;font-size:11px;color:var(--text-dim);">order ${sol.order || i + 1}</span>
+    // Header — single pipeline name
+    const pipelineName = `${escapeHtml(data.SITE_NAME || 'Site')}-Pipeline`;
+    const header = `<div class="pipeline-solution-label">
+  <span class="pipeline-solution-dot" style="background:${colors[0]};"></span>
+  <span class="pipeline-solution-name">${pipelineName}</span>
+  <span style="margin-left:auto;font-size:11px;color:var(--text-dim);">1 pipeline · ${proposedSolutions.filter((s) => !s.isFutureBuffer).length} run${proposedSolutions.filter((s) => !s.isFutureBuffer).length === 1 ? '' : 's'}</span>
 </div>
-<div class="pipeline-container">
-  ${stages.map((st) => `<div class="pipeline-stage ${st.type === 'source' ? 'stage-active' : ''}">
-    <div class="stage-name">${escapeHtml(st.label || '')}</div>
-    <div class="stage-env">${escapeHtml(st.envUrl || '')}</div>
-  </div>`).join('')}
+<div class="pipeline-container">${stagesHtml}</div>`;
+
+    // Deployment order list — each solution is a stage run. Future buffer shown
+    // distinctly so reviewers understand it's created but not deployed yet.
+    const orderRows = proposedSolutions.map((sol, i) => {
+      const color = colors[i % colors.length];
+      const isFuture = !!sol.isFutureBuffer;
+      const label = isFuture ? 'Skipped (empty)' : `Run ${sol.order || i + 1}`;
+      const labelColor = isFuture ? 'var(--text-dim)' : color;
+      return `<div class="pipeline-solution-label" style="margin-top:8px;">
+  <span class="pipeline-solution-dot" style="background:${labelColor};"></span>
+  <span class="pipeline-solution-name">${escapeHtml(sol.uniqueName)}</span>
+  <span style="margin-left:auto;font-size:11px;color:${isFuture ? 'var(--text-dim)' : 'var(--text-dim)'};">${label}</span>
 </div>`;
-    }).join('\n');
+    }).join('');
+
+    return `${header}
+<div style="margin-top:16px;">
+  <h4 style="margin:0 0 8px 0;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em;">Deployment order</h4>
+  ${orderRows}
+</div>`;
   }
-  return `<div class="pipeline-container">
-  ${stages.map((st) => `<div class="pipeline-stage ${st.type === 'source' ? 'stage-active' : ''}">
-    <div class="stage-name">${escapeHtml(st.label || '')}</div>
-    <div class="stage-env">${escapeHtml(st.envUrl || '')}</div>
-  </div>`).join('')}
-</div>`;
+  return `<div class="pipeline-container">${stagesHtml}</div>`;
 }
 
 function buildChecklistHtml() {

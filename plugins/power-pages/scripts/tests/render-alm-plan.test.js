@@ -413,3 +413,180 @@ test('render-alm-plan: PLAN_STATUS value drives CSS class on plan-status span', 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+// ── Test 11: Solutions tab surfaces an Asset Advisory callout when the
+//             primary recommendation is externalize-media ───────────────────
+
+test('render-alm-plan: Solutions tab shows a callout + link to Asset Advisory when recommendation is externalize-media', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-alm-out-'));
+  const outputPath = path.join(tmpDir, 'alm-plan.html');
+
+  try {
+    const data = makeValidData({
+      // Non-trivial proposedSolutions so buildSolutionsHtml exercises the card path
+      // and prefixes the callout. Without solutions the "(None)" note-box is rendered.
+      proposedSolutions: [
+        { uniqueName: 'Site_Core', displayName: 'Core', order: 1, sizeMB: 45, componentCount: 200, componentTypes: ['Web Page'] },
+        { uniqueName: 'Site_Web', displayName: 'Web Assets', order: 2, sizeMB: 90, componentCount: 150, componentTypes: ['Web File'] },
+      ],
+      assetAdvisory: {
+        enabled: true,
+        recommendation: 'externalize-media',
+        candidates: [
+          { name: 'hero.jpg', sizeMB: 5.2, rationale: 'Large media asset', recommendation: 'azure-blob', suggestedUrlFormat: '' },
+          { name: 'bg.png', sizeMB: 3.8, rationale: 'Large media asset', recommendation: 'cdn', suggestedUrlFormat: '' },
+        ],
+      },
+    });
+    const { status } = runScript(data, outputPath);
+    assert.equal(status, 0, 'Expected exit 0');
+
+    const html = fs.readFileSync(outputPath, 'utf8');
+
+    // Callout text itself
+    assert.ok(html.includes('A split may not be necessary.'),
+      'Solutions tab should include the externalize callout headline');
+
+    // Aggregate size from candidates (5.2 + 3.8 = 9.0)
+    assert.ok(html.includes('9.0 MB'),
+      'Callout should show aggregate MB from candidates');
+
+    // Link to the Asset Advisory tab — verify the target tab exists and
+    // the callout references it by the existing data-tab value.
+    assert.ok(html.includes('data-tab="advisory"'),
+      'Advisory tab button must still exist');
+    assert.ok(html.includes('solutions-to-advisory'),
+      'Callout should use the dedicated class so the interaction is testable');
+
+    // The callout must appear inside the Solutions tab section and before the
+    // next tab opens (Pipelines). Template order is: Advisory → EnvVars →
+    // Solutions → Pipelines, so the callout sits between `tab-solutions` and
+    // `tab-pipelines` markers.
+    const solIdx = html.indexOf('id="tab-solutions"');
+    const pipeIdx = html.indexOf('id="tab-pipelines"');
+    const calloutIdx = html.indexOf('A split may not be necessary.');
+    assert.ok(solIdx !== -1 && pipeIdx !== -1 && calloutIdx !== -1, 'All markers present');
+    assert.ok(calloutIdx > solIdx, 'Callout should appear after the Solutions tab opens');
+    assert.ok(calloutIdx < pipeIdx, 'Callout should appear before the Pipelines tab (i.e., within Solutions)');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('render-alm-plan: Solutions tab has NO callout when recommendation is not externalize-media', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-alm-out-'));
+  const outputPath = path.join(tmpDir, 'alm-plan.html');
+
+  try {
+    const data = makeValidData({
+      proposedSolutions: [
+        { uniqueName: 'Site_Core', displayName: 'Core', order: 1, sizeMB: 45, componentCount: 200, componentTypes: ['Web Page'] },
+      ],
+      assetAdvisory: {
+        enabled: true,
+        recommendation: null, // nothing flagged
+        candidates: [],
+      },
+    });
+    const { status } = runScript(data, outputPath);
+    assert.equal(status, 0);
+    const html = fs.readFileSync(outputPath, 'utf8');
+    assert.ok(!html.includes('A split may not be necessary.'),
+      'No callout when externalize is not recommended');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('render-alm-plan: Solutions tab has NO callout when asset advisory is disabled', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-alm-out-'));
+  const outputPath = path.join(tmpDir, 'alm-plan.html');
+
+  try {
+    const data = makeValidData({
+      proposedSolutions: [
+        { uniqueName: 'Site_Core', displayName: 'Core', order: 1, sizeMB: 45, componentCount: 200, componentTypes: ['Web Page'] },
+      ],
+      assetAdvisory: { enabled: false, recommendation: 'externalize-media', candidates: [] },
+    });
+    const { status } = runScript(data, outputPath);
+    assert.equal(status, 0);
+    const html = fs.readFileSync(outputPath, 'utf8');
+    assert.ok(!html.includes('A split may not be necessary.'),
+      'Disabled advisory must not surface the callout');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+// ── Test 12: Pipelines tab shows ONE pipeline + multiple runs in multi-solution plans
+
+test('render-alm-plan: multi-solution Pipelines tab shows a single pipeline with N runs (not N pipelines)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-alm-out-'));
+  const outputPath = path.join(tmpDir, 'alm-plan.html');
+
+  try {
+    const data = makeValidData({
+      SITE_NAME: 'IdeaSphere',
+      proposedSolutions: [
+        { uniqueName: 'IdeaSphere_Core', displayName: 'Core', order: 1, sizeMB: 45, componentCount: 200, componentTypes: ['Web Page'] },
+        { uniqueName: 'IdeaSphere_WebAssets', displayName: 'Web Assets', order: 2, sizeMB: 90, componentCount: 150, componentTypes: ['Web File'] },
+        { uniqueName: 'IdeaSphere_Future', displayName: 'Future Growth', order: 3, sizeMB: 0, componentCount: 0, componentTypes: ['Any'], isFutureBuffer: true },
+      ],
+    });
+    const { status } = runScript(data, outputPath);
+    assert.equal(status, 0);
+    const html = fs.readFileSync(outputPath, 'utf8');
+
+    // Single pipeline header, not one per solution.
+    assert.ok(html.includes('IdeaSphere-Pipeline'),
+      'Should show a single pipeline named after the site');
+    assert.ok(!html.includes('IdeaSphere_Core-Pipeline'),
+      'Old per-solution pipeline name should NOT appear');
+    assert.ok(!html.includes('IdeaSphere_WebAssets-Pipeline'),
+      'Old per-solution pipeline name should NOT appear');
+
+    // Tab title should not say "Deployment Pipelines (N)".
+    assert.ok(!/Deployment Pipelines \(\d+\)/.test(html),
+      'Tab title should say "Deployment Pipeline" (singular) now');
+
+    // "Deployment order" block lists solutions.
+    assert.ok(html.includes('Deployment order'),
+      'Should show a Deployment order block');
+    assert.ok(html.includes('IdeaSphere_Core'),
+      'Solution names still surface per run');
+    assert.ok(html.includes('IdeaSphere_WebAssets'));
+
+    // Future buffer is labeled as skipped, not as "Run 3".
+    assert.ok(html.includes('Skipped (empty)'),
+      'Future buffer should show "Skipped (empty)" label');
+
+    // Descriptor text reflects 1 pipeline.
+    assert.ok(html.includes('One Power Platform Pipeline runs 2 solutions'),
+      'Description should state 1 pipeline running 2 deployable solutions');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('render-alm-plan: single-solution Pipelines tab keeps simple stage flow', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-alm-out-'));
+  const outputPath = path.join(tmpDir, 'alm-plan.html');
+
+  try {
+    const data = makeValidData({
+      proposedSolutions: [
+        { uniqueName: 'SiteSolution', displayName: 'Site', order: 1, sizeMB: 30, componentCount: 80, componentTypes: ['All'] },
+      ],
+    });
+    const { status } = runScript(data, outputPath);
+    assert.equal(status, 0);
+    const html = fs.readFileSync(outputPath, 'utf8');
+    // Single-solution path should NOT include the "Deployment order" subheading.
+    assert.ok(!html.includes('Deployment order'),
+      'Single-solution plan should not show a per-run list');
+    assert.ok(!html.includes('Skipped (empty)'));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
