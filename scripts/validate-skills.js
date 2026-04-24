@@ -11,6 +11,8 @@ const path = require('path');
 const SKILLS_DIR = path.resolve(__dirname, '../skills');
 const REQUIRED_FIELDS = ['id', 'name', 'description', 'version', 'category'];
 const VERSION_REGEX = /^\d+\.\d+\.\d+$/;
+// bumped min description length from 10 to 20 — 10 chars is way too short to be useful
+const MIN_DESCRIPTION_LENGTH = 20;
 
 let errors = [];
 let warnings = [];
@@ -72,7 +74,7 @@ function validateSkill(skill, filePath) {
   }
 
   // Warn if description is too short
-  if (skill.description && skill.description.trim().length < 10) {
+  if (skill.description && skill.description.trim().length < MIN_DESCRIPTION_LENGTH) {
     warnings.push(`[${relativePath}] Description seems too short for skill "${skill.id}"`);
   }
 }
@@ -103,26 +105,4 @@ function main() {
     }
 
     const skills = Array.isArray(parsed) ? parsed : [parsed];
-    for (const skill of skills) {
-      validateSkill(skill, filePath);
-    }
-  }
-
-  if (warnings.length > 0) {
-    console.warn('⚠️  Warnings:');
-    warnings.forEach(w => console.warn(`  ${w}`));
-    console.log();
-  }
-
-  if (errors.length > 0) {
-    console.error('❌ Validation failed with errors:');
-    errors.forEach(e => console.error(`  ${e}`));
-    console.log();
-    process.exit(1);
-  }
-
-  console.log(`✅ All ${files.length} skill file(s) passed validation.`);
-  process.exit(0);
-}
-
-main();
+    for (const 
