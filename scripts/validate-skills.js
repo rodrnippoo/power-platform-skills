@@ -77,6 +77,11 @@ function validateSkill(skill, filePath) {
   if (skill.description && skill.description.trim().length < MIN_DESCRIPTION_LENGTH) {
     warnings.push(`[${relativePath}] Description seems too short for skill "${skill.id}"`);
   }
+
+  // Warn if skill ID contains uppercase letters — prefer kebab-case IDs for consistency
+  if (skill.id && /[A-Z]/.test(skill.id)) {
+    warnings.push(`[${relativePath}] Skill ID "${skill.id}" contains uppercase letters — consider using kebab-case`);
+  }
 }
 
 /**
@@ -104,5 +109,23 @@ function main() {
       continue;
     }
 
-    const skills = Array.isArray(parsed) ? parsed : [parsed];
-    for (const 
+    validateSkill(parsed, filePath);
+  }
+
+  if (warnings.length > 0) {
+    console.log('⚠️  Warnings:');
+    warnings.forEach(w => console.log(`  ${w}`));
+    console.log();
+  }
+
+  if (errors.length > 0) {
+    console.log('❌ Validation failed with errors:');
+    errors.forEach(e => console.log(`  ${e}`));
+    process.exit(1);
+  }
+
+  console.log('✅ All skill files are valid!');
+  process.exit(0);
+}
+
+main();
