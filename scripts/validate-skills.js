@@ -82,6 +82,11 @@ function validateSkill(skill, filePath) {
   if (skill.id && /[A-Z]/.test(skill.id)) {
     warnings.push(`[${relativePath}] Skill ID "${skill.id}" contains uppercase letters — consider using kebab-case`);
   }
+
+  // personal addition: warn if skill ID has underscores — kebab-case only please
+  if (skill.id && skill.id.includes('_')) {
+    warnings.push(`[${relativePath}] Skill ID "${skill.id}" uses underscores — prefer kebab-case (e.g. my-skill not my_skill)`);
+  }
 }
 
 /**
@@ -97,35 +102,4 @@ function main() {
     process.exit(0);
   }
 
-  console.log(`Found ${files.length} skill file(s).\n`);
-
-  for (const filePath of files) {
-    let parsed;
-    try {
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      errors.push(`[${path.relative(process.cwd(), filePath)}] Failed to parse JSON: ${err.message}`);
-      continue;
-    }
-
-    validateSkill(parsed, filePath);
-  }
-
-  if (warnings.length > 0) {
-    console.log('⚠️  Warnings:');
-    warnings.forEach(w => console.log(`  ${w}`));
-    console.log();
-  }
-
-  if (errors.length > 0) {
-    console.log('❌ Validation failed with errors:');
-    errors.forEach(e => console.log(`  ${e}`));
-    process.exit(1);
-  }
-
-  console.log('✅ All skill files are valid!');
-  process.exit(0);
-}
-
-main();
+  console.log(`Found ${files
