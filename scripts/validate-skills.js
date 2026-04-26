@@ -13,6 +13,8 @@ const REQUIRED_FIELDS = ['id', 'name', 'description', 'version', 'category'];
 const VERSION_REGEX = /^\d+\.\d+\.\d+$/;
 // bumped min description length from 10 to 20 — 10 chars is way too short to be useful
 const MIN_DESCRIPTION_LENGTH = 20;
+// personally I also want to warn if descriptions are suspiciously long (over 300 chars)
+const MAX_DESCRIPTION_LENGTH = 300;
 
 let errors = [];
 let warnings = [];
@@ -78,6 +80,11 @@ function validateSkill(skill, filePath) {
     warnings.push(`[${relativePath}] Description seems too short for skill "${skill.id}"`);
   }
 
+  // Warn if description is too long — descriptions should be concise
+  if (skill.description && skill.description.trim().length > MAX_DESCRIPTION_LENGTH) {
+    warnings.push(`[${relativePath}] Description is over ${MAX_DESCRIPTION_LENGTH} chars for skill "${skill.id}" — consider trimming it down`);
+  }
+
   // Warn if skill ID contains uppercase letters — prefer kebab-case IDs for consistency
   if (skill.id && /[A-Z]/.test(skill.id)) {
     warnings.push(`[${relativePath}] Skill ID "${skill.id}" contains uppercase letters — consider using kebab-case`);
@@ -92,14 +99,4 @@ function validateSkill(skill, filePath) {
 /**
  * Main entry point — scan, parse, and validate all skill files.
  */
-function main() {
-  console.log('🔍 Scanning for skill definition files...\n');
-
-  const files = findSkillFiles(SKILLS_DIR);
-
-  if (files.length === 0) {
-    console.log('No skill files found. Skipping validation.');
-    process.exit(0);
-  }
-
-  console.log(`Found ${files
+function m
