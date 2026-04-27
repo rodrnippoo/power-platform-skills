@@ -87,16 +87,57 @@ function validateSkill(skill, filePath) {
 
   // Warn if skill ID contains uppercase letters — prefer kebab-case IDs for consistency
   if (skill.id && /[A-Z]/.test(skill.id)) {
-    warnings.push(`[${relativePath}] Skill ID "${skill.id}" contains uppercase letters — consider using kebab-case`);
+    warnings.push(`[${relativePath}] Skill ID "${skill.id}" contains uppercase letters — use kebab-case instead`);
   }
 
-  // personal addition: warn if skill ID has underscores — kebab-case only please
-  if (skill.id && skill.id.includes('_')) {
-    warnings.push(`[${relativePath}] Skill ID "${skill.id}" uses underscores — prefer kebab-case (e.g. my-skill not my_skill)`);
+  // Warn if skill ID contains underscores — kebab-case only, no snake_case
+  // I keep seeing snake_case IDs sneak in, adding this check to catch them
+  if (skill.id && /_/.test(skill.id)) {
+    warnings.push(`[${relativePath}] Skill ID "${skill.id}" contains underscores — prefer kebab-case (e.g. my-skill)`);
   }
 }
 
 /**
- * Main entry point — scan, parse, and validate all skill files.
+ * Main entry point. Finds and validates all skill files.
  */
-function m
+function main() {
+  const files = findSkillFiles(SKILLS_DIR);
+
+  if (files.length === 0) {
+    console.log('No skill files found.');
+    process.exit(0);
+  }
+
+  console.log(`Validating ${files.length} skill file(s)...\n`);
+
+  for (const filePath of files) {
+    let skill;
+    try {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      skill = JSON.parse(raw);
+    } catch (err) {
+      errors.push(`[${path.relative(process.cwd(), filePath)}] Failed to parse JSON: ${err.message}`);
+      continue;
+    }
+    validateSkill(skill, filePath);
+  }
+
+  if (warnings.length > 0) {
+    console.log('Warnings:');
+    warnings.forEach(w => console.log(`  ⚠  ${w}`));
+    console.log();
+  }
+
+  if (errors.length > 0) {
+    console.log('Errors:');
+    errors.forEach(e => console.log(`  ✖  ${e}`));
+    console.log();
+    console.error(`Validation failed with ${errors.length} error(s).`);
+    process.exit(1);
+  }
+
+  console.log(`✔ All ${files.length} skill file(s) passed validation.`);
+  process.exit(0);
+}
+
+main();
