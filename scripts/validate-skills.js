@@ -87,13 +87,12 @@ function validateSkill(skill, filePath) {
 
   // Warn if skill ID contains uppercase letters — prefer kebab-case IDs for consistency
   if (skill.id && /[A-Z]/.test(skill.id)) {
-    warnings.push(`[${relativePath}] Skill ID "${skill.id}" contains uppercase letters — use kebab-case instead`);
+    warnings.push(`[${relativePath}] Skill ID "${skill.id}" contains uppercase letters — use kebab-case instead (e.g. my-skill-id)`);
   }
 
   // Warn if skill ID contains underscores — kebab-case preferred over snake_case
-  // (I keep seeing snake_case IDs sneak in, this catches them)
-  if (skill.id && skill.id.includes('_')) {
-    warnings.push(`[${relativePath}] Skill ID "${skill.id}" uses underscores — prefer kebab-case (e.g. my-skill-id)`);
+  if (skill.id && /_/.test(skill.id)) {
+    warnings.push(`[${relativePath}] Skill ID "${skill.id}" uses underscores — prefer hyphens for kebab-case consistency`);
   }
 }
 
@@ -124,19 +123,19 @@ function main() {
 
   if (warnings.length > 0) {
     console.log('Warnings:');
-    warnings.forEach(w => console.log(`  ⚠  ${w}`));
+    warnings.forEach(w => console.warn(`  ⚠  ${w}`));
     console.log();
   }
 
   if (errors.length > 0) {
     console.log('Errors:');
-    errors.forEach(e => console.log(`  ✖  ${e}`));
-    console.log(`\nValidation failed with ${errors.length} error(s).`);
+    errors.forEach(e => console.error(`  ✖  ${e}`));
+    console.log();
+    console.error(`Validation failed with ${errors.length} error(s).`);
     process.exit(1);
   }
 
   console.log(`✔ All ${files.length} skill file(s) passed validation.`);
-  process.exit(0);
 }
 
 main();
