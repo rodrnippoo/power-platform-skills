@@ -90,10 +90,10 @@ function validateSkill(skill, filePath) {
     warnings.push(`[${relativePath}] Skill ID "${skill.id}" contains uppercase letters — use kebab-case instead`);
   }
 
-  // Warn if skill ID contains underscores — kebab-case only, no snake_case
-  // I keep seeing snake_case IDs sneak in, adding this check to catch them
-  if (skill.id && /_/.test(skill.id)) {
-    warnings.push(`[${relativePath}] Skill ID "${skill.id}" contains underscores — prefer kebab-case (e.g. my-skill)`);
+  // Warn if skill ID contains underscores — kebab-case preferred over snake_case
+  // (I keep seeing snake_case IDs sneak in, this catches them)
+  if (skill.id && skill.id.includes('_')) {
+    warnings.push(`[${relativePath}] Skill ID "${skill.id}" uses underscores — prefer kebab-case (e.g. my-skill-id)`);
   }
 }
 
@@ -113,7 +113,7 @@ function main() {
   for (const filePath of files) {
     let skill;
     try {
-      const raw = fs.readFileSync(filePath, 'utf8');
+      const raw = fs.readFileSync(filePath, 'utf-8');
       skill = JSON.parse(raw);
     } catch (err) {
       errors.push(`[${path.relative(process.cwd(), filePath)}] Failed to parse JSON: ${err.message}`);
@@ -131,8 +131,7 @@ function main() {
   if (errors.length > 0) {
     console.log('Errors:');
     errors.forEach(e => console.log(`  ✖  ${e}`));
-    console.log();
-    console.error(`Validation failed with ${errors.length} error(s).`);
+    console.log(`\nValidation failed with ${errors.length} error(s).`);
     process.exit(1);
   }
 
